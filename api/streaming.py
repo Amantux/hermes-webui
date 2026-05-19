@@ -248,6 +248,13 @@ def _preferred_agent_display_name() -> str:
     return name or 'Hermes'
 
 
+def _preferred_agent_display_name_for_session(session) -> str:
+    profile = str(getattr(session, 'profile', '') or '').strip()
+    if profile and profile != 'default':
+        return profile[:1].upper() + profile[1:]
+    return _preferred_agent_display_name()
+
+
 def _cancelled_turn_hint(agent_name: str | None = None) -> str:
     name = str(agent_name or _preferred_agent_display_name()).strip() or 'Hermes'
     return f'The run was cancelled by the user before {name} finished. No provider failure occurred.'
@@ -399,14 +406,14 @@ def _session_has_cancel_marker(session) -> bool:
     return False
 
 
-def _cancelled_turn_content(message: str = 'Task cancelled.') -> str:
+def _cancelled_turn_content(message: str = 'Task cancelled.', agent_name: str | None = None) -> str:
     """Return cancelled-turn copy matching the verbose provider-error layout."""
     _message = str(message or 'Task cancelled.').strip()
     if not _message.endswith('.'):
         _message += '.'
     return (
         f"**Task cancelled:** {_message}\n\n"
-        f"*{_cancelled_turn_hint()}*"
+        f"*{_cancelled_turn_hint(agent_name)}*"
     )
 
 
@@ -423,9 +430,10 @@ def _persist_cancelled_turn(session, *, message: str = 'Task cancelled.') -> Non
     session.pending_attachments = []
     session.pending_started_at = None
     if not _session_has_cancel_marker(session):
+        agent_name = _preferred_agent_display_name_for_session(session)
         session.messages.append({
             'role': 'assistant',
-            'content': _cancelled_turn_content(message),
+            'content': _cancelled_turn_content(message, agent_name),
             '_error': True,
             'provider_details': str(message or 'Task cancelled.').strip(),
             'provider_details_label': 'Cancellation details',
@@ -5572,7 +5580,10 @@ def cancel_stream(stream_id: str) -> bool:
                 if not _cancel_marker_exists:
                     _cs.messages.append({
                         'role': 'assistant',
-                        'content': _cancelled_turn_content('Task cancelled.'),
+                        'content': _cancelled_turn_content(
+                            'Task cancelled.',
+                            _preferred_agent_display_name_for_session(_cs),
+                        ),
                         '_error': True,
                         'provider_details': 'Task cancelled.',
                         'provider_details_label': 'Cancellation details',
