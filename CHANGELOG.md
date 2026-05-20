@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Rebuild the WebUI session index during startup recovery when `_index.json` is missing, even when no `.bak` session restore occurs, so large state directories avoid repeated full-scan `/api/sessions` fallback after an index loss.
+
 
 ## [v0.51.95] — 2026-05-20 — Release BS (stage-388 — 5-PR batch — live tool callback event dedup + browser-only dashboard links + messaging transcript merge alignment + Geist Contrast skin + SSE runtime diagnostics)
 
