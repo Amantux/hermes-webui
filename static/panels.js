@@ -7094,7 +7094,14 @@ function loadGatewayStatus(){
   api('/api/gateway/status').then(r=>{
     if(!r) return;
     if(!r.configured){
-      card.innerHTML=`<div style="color:var(--muted);font-size:12px;display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:#f59e0b;display:inline-block"></span>Gateway not configured</div>`;
+      card.innerHTML=`<div style="color:var(--muted);font-size:12px">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+          <span style="width:8px;height:8px;border-radius:50%;background:#f59e0b;flex-shrink:0;display:inline-block"></span>
+          <span style="font-weight:600">Gateway not configured</span>
+        </div>
+        <p style="margin:0;line-height:1.5">Scheduled job <em>ticks</em> require a gateway daemon. Jobs can still be created and run manually here.<br>
+        To enable automatic ticks in a single-container setup, set <code>HERMES_GATEWAY_ENABLED=1</code> in your <code>.env</code> file.</p>
+      </div>`;
       return;
     }
     if(!r.running){

@@ -453,6 +453,30 @@ fi
 ensure_hindsight_client_docker_dependency
 
 echo ""; echo "== Running hermes-webui"
+
+# Optional background gateway — enables cron job ticks in a single-container
+# deployment. Set HERMES_GATEWAY_ENABLED=1 in your environment or .env file.
+# The gateway starts as a background daemon AFTER the venv is ready; any startup
+# failures are logged but do NOT prevent the WebUI from starting.
+if [ "${HERMES_GATEWAY_ENABLED:-0}" = "1" ]; then
+  if command -v hermes >/dev/null 2>&1 || [ -x /app/venv/bin/hermes ]; then
+    echo ""; echo "== Starting Hermes gateway in background (HERMES_GATEWAY_ENABLED=1)"
+    _hermes_bin=${HERMES_BIN:-/app/venv/bin/hermes}
+    # Verify the gateway sub-command exists before trying to start it
+    if "${_hermes_bin}" gateway --help >/dev/null 2>&1; then
+      "${_hermes_bin}" gateway run \
+        --log-file "${HERMES_WEBUI_STATE_DIR}/gateway.log" \
+        >/dev/null 2>&1 &
+      _gw_pid=$!
+      echo "-- Gateway started (PID ${_gw_pid}); log: ${HERMES_WEBUI_STATE_DIR}/gateway.log"
+    else
+      echo "!! WARNING: 'hermes gateway' sub-command not available — skipping gateway start"
+    fi
+  else
+    echo "!! WARNING: HERMES_GATEWAY_ENABLED=1 but 'hermes' binary not found — skipping"
+  fi
+fi
+
 cd /app; python server.py || error_exit "hermes-webui failed or exited with an error"
 
 # we should never be here because the server should be running indefinitely, but if we are, we exit safely

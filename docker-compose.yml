@@ -1,21 +1,52 @@
 services:
   hermes-webui:
-    build: .
-    user: root
-    # Bridge networking for explicit port mapping
+    build:
+      context: .
+      args:
+        # Pin to a specific hermes-agent commit/tag for reproducible builds.
+        # Omit (or set to "main") to always pull the latest agent source.
+        # HERMES_AGENT_REF: "v0.14.0"
+    # UID/GID remapping, dependency install, and server startup are all handled
+    # by docker_init.bash. DO NOT override CMD here — bypassing the init script
+    # skips hermes-agent installation and UID alignment entirely.
     ports:
-      - "9220:8787"
+      - "${HERMES_WEBUI_PORT:-9220}:8787"
     volumes:
-      - /root/.hermes:/home/hermeswebui/.hermes
-      - /root/workspace:/workspace
-      - /usr/local/lib/hermes-agent:/home/hermeswebui/hermes-agent
+      # ── Host Hermes home (required) ──────────────────────────────────────────
+      # Maps your host ~/.hermes into the container so the WebUI shares your
+      # existing config, provider keys, sessions, skills, memory, and cron jobs.
+      # Change HERMES_HOME in a .env file if your Hermes data lives elsewhere:
+      #   echo "HERMES_HOME=/opt/hermes-data" >> .env
+      - ${HERMES_HOME:-~/.hermes}:/home/hermeswebui/.hermes
+
+      # ── Workspace (optional but recommended) ─────────────────────────────────
+      # The file browser and workspace tools read from /workspace inside the
+      # container. Point HERMES_WORKSPACE at your project directory on the host.
+      - ${HERMES_WORKSPACE:-~/workspace}:/workspace
+
+      # ── Local hermes-agent override (developer mode, commented out by default)
+      # Uncomment to overlay a local hermes-agent checkout on top of the one
+      # baked into the image. Useful for testing agent changes without rebuilding.
+      # This mount takes priority over /opt/hermes (the baked-in source).
+      # - ${HERMES_AGENT_DIR:-/usr/local/lib/hermes-agent}:/home/hermeswebui/.hermes/hermes-agent
+
     environment:
       - HERMES_WEBUI_HOST=0.0.0.0
       - HERMES_WEBUI_PORT=8787
+      # Where the WebUI stores its own state (sessions, workspaces, settings).
+      # This lives INSIDE the mounted .hermes directory so it persists across
+      # container restarts alongside your agent config and sessions.
       - HERMES_WEBUI_STATE_DIR=/home/hermeswebui/.hermes/webui
-      - HERMES_WEBUI_PASSWORD=${HERMES_WEBUI_PASSWORD}
-      - HERMES_WEBUI_AGENT_DIR=/home/hermeswebui/hermes-agent
-      - UV_IGNORE_VENV=1
+      # Optional password — strongly recommended when exposed outside localhost.
+      - HERMES_WEBUI_PASSWORD=${HERMES_WEBUI_PASSWORD:-}
+      # UID/GID alignment: the init script auto-detects the right UID/GID from
+      # the mounted .hermes directory. Override explicitly if auto-detection fails
+      # (e.g. macOS where UIDs start at 501 rather than 1000):
+      #   echo "UID=$(id -u)" >> .env && echo "GID=$(id -g)" >> .env
+      - WANTED_UID=${UID:-1000}
+      - WANTED_GID=${GID:-1000}
+      # Optional: start a gateway process in the background so cron job ticks
+      # work inside this single container. Requires provider keys in ~/.hermes.
+      # Set to "1" to enable:  echo "HERMES_GATEWAY_ENABLED=1" >> .env
+      - HERMES_GATEWAY_ENABLED=${HERMES_GATEWAY_ENABLED:-0}
     restart: unless-stopped
-    # Bypass the init loop and run server directly
-    command: python3 /apptoo/server.py

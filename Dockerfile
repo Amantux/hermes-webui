@@ -75,6 +75,38 @@ COPY --chown=root:root . /apptoo
 ARG HERMES_VERSION=unknown
 RUN echo "__version__ = '${HERMES_VERSION}'" > /apptoo/api/_version.py
 
+# ── Bake hermes-agent into the image ──────────────────────────────────────────
+# Clone the official hermes-agent source to /opt/hermes so that all modules
+# (cron, agent, gateway, etc.) are available at runtime without a mounted volume.
+# docker_init.bash already knows to look here as its second-priority agent path.
+#
+# At runtime, mounting a local checkout at
+#   /home/hermeswebui/.hermes/hermes-agent   (first-priority path)
+# will take precedence — useful for developers who want to test local changes.
+#
+# Build args let CI pin or override the source:
+#   --build-arg HERMES_AGENT_REPO=https://github.com/NousResearch/hermes-agent.git
+#   --build-arg HERMES_AGENT_REF=main
+ARG HERMES_AGENT_REPO=https://github.com/NousResearch/hermes-agent.git
+ARG HERMES_AGENT_REF=main
+RUN git clone --depth=1 --branch "${HERMES_AGENT_REF}" "${HERMES_AGENT_REPO}" /opt/hermes \
+    && chown -R hermeswebui:hermeswebui /opt/hermes
+
+# Pre-warm the uv dependency cache with ALL Python packages (webui + agent).
+# docker_init.bash creates the real venv at first startup, but with a warm cache
+# all packages are installed from disk rather than downloaded from PyPI, so the
+# first container boot completes in seconds instead of minutes.
+# The throwaway venv is discarded; only /uv_cache is kept in the final image.
+RUN UV_CACHE_DIR=/uv_cache uv venv /tmp/prebuild-venv \
+    && UV_CACHE_DIR=/uv_cache VIRTUAL_ENV=/tmp/prebuild-venv \
+       uv pip install -r /apptoo/requirements.txt \
+           --trusted-host pypi.org --trusted-host files.pythonhosted.org \
+    && UV_CACHE_DIR=/uv_cache VIRTUAL_ENV=/tmp/prebuild-venv \
+       uv pip install /opt/hermes[all] \
+           --trusted-host pypi.org --trusted-host files.pythonhosted.org \
+    && rm -rf /tmp/prebuild-venv \
+    && chown -R hermeswebui:hermeswebui /uv_cache
+
 # Default to binding all interfaces (required for container networking)
 ENV HERMES_WEBUI_HOST=0.0.0.0
 ENV HERMES_WEBUI_PORT=8787

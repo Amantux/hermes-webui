@@ -12,6 +12,9 @@
 - **WhisperX voice transcription** noted in README Voice input section.
 - **Mic button in memory edit panel**: Memory/notes edit form now has a 🎤 dictation button next to the label; uses the same Web Speech API + WhisperX fallback as the composer mic. Powered by new global `window._startMicForTextarea()` helper in `boot.js`.
 - **Git repo context pin**: Composer footer now has a 📌 button to pin any local git repo as context. On each send, the repo's branch, last 10 commits, and dirty-file list are prepended to the message. Backend: `GET /api/git/context?path=...`. Frontend: popover with live validation, stored in `localStorage`. Hooks into `send()` via `window._preSendHooks` middleware array.
+- **Hermes-agent baked into Docker image**: `Dockerfile` now clones `NousResearch/hermes-agent` to `/opt/hermes` at build time and pre-warms the uv dependency cache. All hermes modules (`cron`, `agent`, `gateway`, etc.) are available on first container start without a mounted volume or network download.
+- **`HERMES_GATEWAY_ENABLED` env var**: Set to `1` in `.env` to start a background `hermes gateway run` daemon inside the single-container setup, enabling cron job automatic ticks.
+- **`HERMES_AGENT_REF` build arg**: Pin the hermes-agent git branch/tag at image build time (`--build-arg HERMES_AGENT_REF=v0.14.0`). Defaults to `main`.
 
 ### Fixed
 
