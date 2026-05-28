@@ -3,6 +3,13 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Model routing**: `model_with_provider_context()` now wraps slash-qualified model IDs as `@provider:model` when an explicit non-default provider is set, preventing `resolve_model_provider()` from misrouting them via OpenRouter cross-provider heuristics (e.g. `google/recurrentgemma-2b` on `ollama-cloud` now routes correctly).
+- **Provider mismatch toast**: `_checkProviderMismatch()` accepts an `explicitProvider` parameter; when the model picker supplies provider context, the heuristic warning is suppressed entirely (no false positive "may not work with your configured provider" toasts).
+- **Todo panel**: `done` status emitted by the agent is now normalized to `completed` visuals (strikethrough, check icon, muted color). `blocked` status also gets a dedicated icon and amber color.
+- **Appearance defaults**: Default theme changed from `dark` to `system` (respects OS preference); default skin changed from `default` to `geist-contrast`. Prepaint script in `index.html` now uses a clobber guard so true first-visit state does not override `settings.json` server defaults.
+
 ## [v0.51.118] — 2026-05-22 — Release CP (stage-pr2773 — 1-PR hotfix — v0.51.117 brick fix: chat input restored)
 
 ### Fixed

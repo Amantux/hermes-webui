@@ -34,10 +34,10 @@ def post(path, body=None):
 # ── Theme settings ───────────────────────────────────────────────────────
 
 def test_settings_default_theme():
-    """Default theme should be 'dark'."""
+    """Default theme should be 'system'."""
     d, status = get("/api/settings")
     assert status == 200
-    assert d.get("theme") == "dark"
+    assert d.get("theme") == "system"
 
 
 def test_settings_set_theme_light_persists():

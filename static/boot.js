@@ -979,7 +979,7 @@ $('modelSelect').onchange=async()=>{
   _applySessionContextMetadataUpdate(data);
   // Warn if selected model belongs to a different provider than what Hermes is configured for
   if(typeof _checkProviderMismatch==='function'){
-    const warn=_checkProviderMismatch(selectedModel);
+    const warn=_checkProviderMismatch(selectedModel, modelState && modelState.model_provider);
     if(warn&&typeof showToast==='function') showToast(warn,4000);
   }
 };
@@ -1516,7 +1516,7 @@ function applyBotName(){
     const lsTheme=(localStorage.getItem('hermes-theme')||'').trim().toLowerCase();
     const lsSkin=(localStorage.getItem('hermes-skin')||'').trim().toLowerCase();
     const lsAppearance=_normalizeAppearance(lsTheme||null,lsSkin||null);
-    const lsHasExplicitSkin=lsSkin&&lsSkin!=='default';
+    const lsHasExplicitSkin=lsSkin&&lsSkin!=='default'&&lsSkin!=='geist-contrast';
     const lsHasExplicitTheme=lsTheme&&['system','light','dark'].includes(lsTheme);
     const theme=lsHasExplicitTheme?lsAppearance.theme:srvAppearance.theme;
     const skin=lsHasExplicitSkin?lsAppearance.skin:srvAppearance.skin;

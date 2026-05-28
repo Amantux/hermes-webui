@@ -1989,10 +1989,10 @@ def model_with_provider_context(model_id: str, model_provider: str | None = None
     if provider == "openrouter":
         return f"@{provider}:{model}"
 
-    # For non-OpenRouter slash IDs, keep the ID intact so existing custom/proxy
-    # base_url routing and portal-provider handling remain in charge.
+    # For non-OpenRouter slash IDs with an explicit non-default provider,
+    # wrap as @provider:model so resolve_model_provider() routes correctly.
     if "/" in model:
-        return model
+        return f"@{provider}:{model}"
 
     return f"@{provider}:{model}"
 
@@ -4349,8 +4349,8 @@ _SETTINGS_DEFAULTS = {
     "sync_to_insights": False,  # mirror WebUI token usage to state.db for /insights
     "check_for_updates": True,  # check if webui/agent repos are behind upstream
     "whats_new_summary_enabled": False,  # show an LLM-written What's New summary before diff links
-    "theme": "dark",  # light | dark | system
-    "skin": "default",  # accent color skin: default | ares | mono | slate | poseidon | sisyphus | charizard | sienna | catppuccin | nous
+    "theme": "system",  # light | dark | system
+    "skin": "geist-contrast",  # accent color skin: default | ares | mono | slate | poseidon | sisyphus | charizard | sienna | catppuccin | nous | geist-contrast
     "font_size": "default",  # small | default | large | xlarge
     "session_jump_buttons": False,  # show Start/End transcript jump pills
     "session_endless_scroll": False,  # auto-load older transcript pages while scrolling upward

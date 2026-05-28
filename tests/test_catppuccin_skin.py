@@ -43,12 +43,12 @@ def test_catppuccin_skin_palette_has_latte_and_mocha_tokens():
         assert token in CSS, f"Catppuccin Mocha token missing: {token}"
 
 
-def test_catppuccin_skin_is_opt_in_and_preserves_default_dark():
+def test_catppuccin_skin_is_opt_in_and_preserves_system_theme_default():
     """Adding Catppuccin must not silently migrate existing users."""
     init_script_idx = INDEX_HTML.find("var themes=")
     end_idx = INDEX_HTML.find("</script>", init_script_idx)
     init_block = INDEX_HTML[init_script_idx:end_idx]
-    assert "||'dark'" in init_block, "Default theme must remain dark"
+    assert "||'system'" in init_block, "Default theme must be 'system'"
     forbidden = [
         "catppuccin-migrated",
         "skin-catppuccin-migrated",

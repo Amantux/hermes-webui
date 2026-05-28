@@ -58,14 +58,14 @@ def test_sienna_skin_does_not_force_migration():
         )
 
 
-def test_default_theme_is_still_dark():
-    """Adding a new skin must not change the default theme."""
-    # The early-init script defaults to 'dark' when no saved theme exists.
+def test_default_theme_is_system():
+    """Adding a new skin must not change the default theme; it is now 'system'."""
+    # The early-init script defaults to 'system' when no saved theme exists.
     init_script_idx = INDEX_HTML.find("var themes=")
     end_idx = INDEX_HTML.find("</script>", init_script_idx)
     init_block = INDEX_HTML[init_script_idx:end_idx]
-    assert "||'dark'" in init_block, (
-        "Default theme must remain 'dark' (the existing baseline)"
+    assert "||'system'" in init_block, (
+        "Default theme must be 'system' (respects OS light/dark preference)"
     )
 
 

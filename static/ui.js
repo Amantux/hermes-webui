@@ -1207,7 +1207,10 @@ async function _fetchLiveModels(provider, sel){
  * custom provider such as 'custom:zenmux', or the base_url hostname; skip the
  * check for those values to avoid false positives.
  */
-function _checkProviderMismatch(modelId){
+function _checkProviderMismatch(modelId, explicitProvider){
+  if(typeof modelId!=='string' || !modelId) return null;
+  // When the picker already knows the provider context, no heuristic needed
+  if(explicitProvider) return null;
   const ap=(window._activeProvider||'').toLowerCase();
   if(_providerSkipsModelMismatchWarning(ap)) return null; // can't reliably check
   // @provider: prefixed IDs came from that provider's live model list — no mismatch possible

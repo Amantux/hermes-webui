@@ -305,6 +305,29 @@ class TestBootModelSelectChange:
             "Provider mismatch warning must be shown via showToast(), not alert()"
         )
 
+    def test_skips_warning_when_picker_supplies_explicit_provider_context(self):
+        """When the model picker passes an explicitProvider, the mismatch check must be skipped."""
+        src = _read("static/ui.js")
+        idx = src.find("function _checkProviderMismatch")
+        assert idx != -1, "_checkProviderMismatch not found in ui.js"
+        fn_src = src[idx:idx + 500]
+        assert "explicitProvider" in fn_src, (
+            "_checkProviderMismatch must accept explicitProvider parameter"
+        )
+        assert "if(explicitProvider) return null" in fn_src, (
+            "_checkProviderMismatch must return null (no warning) when provider is explicit"
+        )
+
+    def test_boot_passes_provider_context_to_mismatch_check(self):
+        """boot.js must pass model_provider context to _checkProviderMismatch."""
+        src = _read("static/boot.js")
+        idx = src.find("_checkProviderMismatch")
+        assert idx != -1
+        call_src = src[idx:idx + 200]
+        assert "model_provider" in call_src, (
+            "boot.js must pass model_provider to _checkProviderMismatch to suppress false positives"
+        )
+
 
 # ── 6. /api/models: active_provider in response ──────────────────────────────
 
@@ -510,8 +533,9 @@ def test_bare_codex_gpt_runtime_bridge_routes_to_codex(monkeypatch):
     assert base_url is None
 
 
-def test_non_openrouter_slash_model_provider_context_stays_unqualified():
-    """Portal/custom slash IDs must not be blindly wrapped as @provider:model."""
+def test_non_openrouter_slash_model_provider_context_keeps_explicit_provider():
+    """Non-OpenRouter slash IDs with an explicit provider get @provider:model wrapping
+    so resolve_model_provider() routes to the correct backend (not OpenRouter)."""
     import api.config as config
 
     runtime_model = config.model_with_provider_context(
@@ -519,7 +543,7 @@ def test_non_openrouter_slash_model_provider_context_stays_unqualified():
         "nous",
     )
 
-    assert runtime_model == "anthropic/claude-sonnet-4.6"
+    assert runtime_model == "@nous:anthropic/claude-sonnet-4.6"
 
 
 def test_api_session_new_persists_model_provider_context():
