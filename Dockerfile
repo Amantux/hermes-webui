@@ -89,8 +89,9 @@ RUN echo "__version__ = '${HERMES_VERSION}'" > /apptoo/api/_version.py
 #   --build-arg HERMES_AGENT_REF=main
 ARG HERMES_AGENT_REPO=https://github.com/NousResearch/hermes-agent.git
 ARG HERMES_AGENT_REF=main
-RUN git clone --depth=1 --branch "${HERMES_AGENT_REF}" "${HERMES_AGENT_REPO}" /opt/hermes \
-    && chown -R hermeswebui:hermeswebui /opt/hermes
+# Clone to /opt/hermes-agent — this exact path is in config.py's discovery list
+RUN git clone --depth=1 --branch "${HERMES_AGENT_REF}" "${HERMES_AGENT_REPO}" /opt/hermes-agent \
+    && chown -R hermeswebui:hermeswebui /opt/hermes-agent
 
 # Pre-warm the uv dependency cache with ALL Python packages (webui + agent).
 # docker_init.bash creates the real venv at first startup, but with a warm cache
@@ -102,10 +103,10 @@ RUN UV_CACHE_DIR=/uv_cache uv venv /tmp/prebuild-venv \
        uv pip install -r /apptoo/requirements.txt \
            --trusted-host pypi.org --trusted-host files.pythonhosted.org \
     && UV_CACHE_DIR=/uv_cache VIRTUAL_ENV=/tmp/prebuild-venv \
-       uv pip install /opt/hermes[all] \
+       uv pip install /opt/hermes-agent[all] \
            --trusted-host pypi.org --trusted-host files.pythonhosted.org \
     && rm -rf /tmp/prebuild-venv \
-    && chown -R hermeswebui:hermeswebui /uv_cache
+    && chmod -R 777 /uv_cache
 
 # Default to binding all interfaces (required for container networking)
 ENV HERMES_WEBUI_HOST=0.0.0.0

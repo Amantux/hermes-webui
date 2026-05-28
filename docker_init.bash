@@ -243,7 +243,10 @@ if [ "A${whoami}" == "Aroot" ]; then
 
   export UV_CACHE_DIR=${UV_CACHE_DIR:-/uv_cache}
   mkdir -p "${UV_CACHE_DIR}" || error_exit "Failed to create ${UV_CACHE_DIR} directory"
-  chown hermeswebui:hermeswebui "${UV_CACHE_DIR}" || error_exit "Failed to set owner of ${UV_CACHE_DIR} to hermeswebui user"
+  # Recursively chown the entire cache so the remapped runtime UID can use the
+  # pre-warmed packages that were baked in at build time (owned by the build-time UID).
+  chown -R hermeswebui:hermeswebui "${UV_CACHE_DIR}" 2>/dev/null || \
+    chmod -R 777 "${UV_CACHE_DIR}" || true  # fallback if read-only mount
 
   chown -R "${WANTED_UID}:${WANTED_GID}" "$itdir" || error_exit "Failed to set owner of $itdir"
   # Issue #2010 — Railway / user-namespaced runtimes: in-container UID 0 may map
@@ -381,7 +384,7 @@ else
   echo ""; echo "== Adding hermes-agent's pyproject.toml base dependencies to the virtual environment"
   _agent_paths=(
     "/home/hermeswebui/.hermes/hermes-agent"
-    "/opt/hermes"
+    "/opt/hermes-agent"
   )
   _agent_src=""
   for _p in "${_agent_paths[@]}"; do
