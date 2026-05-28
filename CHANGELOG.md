@@ -10,8 +10,13 @@
 - **MCP server configuration section** in README and Features list.
 - **Notes/knowledge graph section** in README and Features list.
 - **WhisperX voice transcription** noted in README Voice input section.
+- **Mic button in memory edit panel**: Memory/notes edit form now has a 🎤 dictation button next to the label; uses the same Web Speech API + WhisperX fallback as the composer mic. Powered by new global `window._startMicForTextarea()` helper in `boot.js`.
+- **Git repo context pin**: Composer footer now has a 📌 button to pin any local git repo as context. On each send, the repo's branch, last 10 commits, and dirty-file list are prepended to the message. Backend: `GET /api/git/context?path=...`. Frontend: popover with live validation, stored in `localStorage`. Hooks into `send()` via `window._preSendHooks` middleware array.
 
 ### Fixed
+
+- **Cron `ImportError` crash**: All cron API endpoints (`/api/crons`, `/api/crons/create`, `/api/crons/update`, etc.) now return a structured `{"unavailable": true, "unavailable_reason": "..."}` JSON response instead of crashing when `cron.jobs` is not on sys.path (e.g. single-container Docker installs without the hermes-agent cron module). The frontend cron panel shows a clear informational banner instead of an error.
+- **`_sse` function missing from `api/streaming.py`**: Restored the accidentally-orphaned `def _sse()` function definition that was dropped in a prior edit, fixing `ImportError: cannot import name '_sse'` at startup.
 
 - **Model routing**: `model_with_provider_context()` now wraps slash-qualified model IDs as `@provider:model` when an explicit non-default provider is set, preventing `resolve_model_provider()` from misrouting them via OpenRouter cross-provider heuristics (e.g. `google/recurrentgemma-2b` on `ollama-cloud` now routes correctly).
 - **Provider mismatch toast**: `_checkProviderMismatch()` accepts an `explicitProvider` parameter; when the model picker supplies provider context, the heuristic warning is suppressed entirely (no false positive "may not work with your configured provider" toasts).

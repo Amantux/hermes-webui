@@ -2899,7 +2899,7 @@ def live_usage_prompt_estimate_after_tool_delta(
     }
 
 
-
+def _sse(handler, event, data):
     """Write one SSE event to the response stream."""
     payload = f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
     handler.wfile.write(payload.encode('utf-8'))

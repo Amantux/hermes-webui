@@ -438,6 +438,17 @@ async function loadCrons(animate) {
   try {
     await loadCronProfiles();
     const data = await api('/api/crons');
+    if (data && data.unavailable) {
+      box.innerHTML = `<div style="padding:16px 12px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <span style="width:8px;height:8px;border-radius:50%;background:#f59e0b;flex-shrink:0;display:inline-block"></span>
+          <span style="font-size:12px;font-weight:600;color:var(--text)">Cron module not available</span>
+        </div>
+        <p style="font-size:12px;color:var(--muted);margin:0 0 8px 0">Scheduled jobs require the Hermes agent cron module (<code>cron.jobs</code>) on the Python path.</p>
+        <p style="font-size:12px;color:var(--muted);margin:0">In a single-container Docker install, jobs can be created and run manually once the agent is installed. See <code>docs/troubleshooting.md</code> for setup.</p>
+      </div>`;
+      return;
+    }
     _cronList = data.jobs || [];
     if (!_cronList.length) {
       box.innerHTML = `<div style="padding:16px;color:var(--muted);font-size:12px">${esc(t('cron_no_jobs'))}</div>`;
@@ -3726,8 +3737,8 @@ function _renderMemoryEdit(section) {
   body.innerHTML = `
     <div class="main-view-content">
       <form class="detail-form" onsubmit="event.preventDefault(); submitMemorySave();">
-        <div class="detail-form-row">
-          <label for="memEditContent">${esc(t('memory_notes_label'))}</label>
+        <div class="detail-form-row" style="position:relative">
+          <label for="memEditContent" style="display:flex;align-items:center;gap:6px">${esc(t('memory_notes_label'))}<button type="button" id="btnMemMic" class="mem-mic-btn icon-btn has-tooltip" data-tooltip="Dictate" onclick="window._startMicForTextarea(document.getElementById('memEditContent'),this)" title="Dictate text">🎤</button></label>
           <textarea id="memEditContent" rows="20" spellcheck="false">${esc(content)}</textarea>
         </div>
         <div id="memEditError" class="detail-form-error" style="display:none"></div>

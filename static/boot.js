@@ -558,9 +558,187 @@ $('btnAttach').onclick=e=>{if(e&&e.preventDefault)e.preventDefault();$('fileInpu
   };
 })();
 window._micActive=window._micActive||false;
+
+// ── Generic "mic into any textarea" helper ───────────────────────────────────
+// Lets other panels (memory edit, notes, etc.) wire a mic button to their own
+// textarea without duplicating the full voice-input stack.
+//
+// Usage: <button onclick="window._startMicForTextarea(document.getElementById('myTA'), this)">🎤</button>
+// The btnEl is given the 'recording' class while active so CSS can style it.
+window._startMicForTextarea=(function(){
+  let _active=null; // {ta, btn, mr, stream, chunks}
+  function _stop(){
+    if(!_active) return;
+    const a=_active; _active=null;
+    if(a.btn) a.btn.classList.remove('recording');
+    if(a.mr&&a.mr.state!=='inactive'){ try{a.mr.stop();}catch(_){} }
+    if(a.stream){ a.stream.getTracks().forEach(t=>t.stop()); }
+  }
+  async function _transcribe(blob,ta){
+    const ext=(blob.type&&blob.type.includes('ogg'))?'ogg':'webm';
+    const form=new FormData();
+    form.append('file',new File([blob],`voice-mem.${ext}`,{type:blob.type||`audio/${ext}`}));
+    try{
+      const res=await fetch('api/transcribe',{method:'POST',body:form});
+      const data=await res.json().catch(()=>({}));
+      if(!res.ok) throw new Error(data.error||'Transcription failed');
+      const txt=data.transcript||'';
+      if(txt){
+        const prev=ta.value;
+        ta.value=prev+(prev&&!prev.endsWith('\n')&&!prev.endsWith(' ')?' ':'')+txt;
+        ta.dispatchEvent(new Event('input'));
+      }
+    }catch(err){ if(typeof showToast==='function') showToast(err.message); }
+  }
+  return async function startMicForTextarea(ta, btnEl){
+    if(_active){ _stop(); return; }
+    const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;
+    const _canRec=!!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia&&window.MediaRecorder);
+    if(!SpeechRecognition&&!_canRec){ if(typeof showToast==='function') showToast('Microphone not supported'); return; }
+    if(btnEl) btnEl.classList.add('recording');
+    if(SpeechRecognition){
+      const rec=new SpeechRecognition();
+      rec.continuous=false; rec.interimResults=true;
+      rec.lang=(typeof _locale!=='undefined'&&_locale._speech)||'en-US';
+      let final='';
+      const prefix=ta.value;
+      _active={ta,btn:btnEl,mr:null,stream:null,chunks:[]};
+      rec.onresult=(e)=>{
+        let interim=''; final='';
+        for(let i=e.resultIndex;i<e.results.length;i++){
+          if(e.results[i].isFinal) final+=e.results[i][0].transcript;
+          else interim+=e.results[i][0].transcript;
+        }
+        ta.value=prefix+(final||interim);
+        ta.dispatchEvent(new Event('input'));
+      };
+      rec.onend=()=>{ _stop(); if(final) ta.value=prefix+(prefix&&!prefix.endsWith(' ')?' ':'')+final.trimStart(); };
+      rec.onerror=(ev)=>{ _stop(); if(typeof showToast==='function') showToast('Mic error: '+ev.error); };
+      rec.start();
+      _active.mr={state:'active',stop:()=>rec.stop()};
+      return;
+    }
+    try{
+      const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+      const chunks=[];
+      const mr=new MediaRecorder(stream);
+      _active={ta,btn:btnEl,mr,stream,chunks};
+      mr.ondataavailable=e=>{ if(e.data&&e.data.size) chunks.push(e.data); };
+      mr.onstop=async()=>{
+        const blob=new Blob(chunks,{type:mr.mimeType||'audio/webm'});
+        _stop();
+        if(blob.size) await _transcribe(blob,ta);
+      };
+      mr.start();
+    }catch(err){ if(btnEl) btnEl.classList.remove('recording'); if(typeof showToast==='function') showToast('Mic denied'); }
+  };
+})();
 window._micPendingSend=window._micPendingSend||false;
 
-// ── Turn-based voice mode (#1333) ────────────────────────────────────────
+// ── Git repo context pin ─────────────────────────────────────────────────────
+// Allows the user to pin a local git repo so branch/commit info is injected
+// as context before each outgoing message.
+(function(){
+  const LS_KEY='hermes-webui-git-context-path';
+
+  function _pinBtn(){ return $('btnGitPin'); }
+  function _popover(){ return $('gitContextPopover'); }
+
+  function _getPinned(){ try{ return localStorage.getItem(LS_KEY)||''; }catch(_){ return ''; } }
+  function _setPinned(p){ try{ p?localStorage.setItem(LS_KEY,p):localStorage.removeItem(LS_KEY); }catch(_){} }
+
+  function _updateBtn(){
+    const btn=_pinBtn(); if(!btn) return;
+    const pinned=_getPinned();
+    btn.style.display='';
+    btn.classList.toggle('active',!!pinned);
+    btn.title=pinned?`Git context: ${pinned}`:'Pin git repo as context';
+    btn.dataset.tooltip=pinned?`📌 ${pinned}`:'Pin git repo as context';
+  }
+
+  window.toggleGitContextPin=function(){
+    const popover=_popover(); if(!popover) return;
+    const isOpen=popover.style.display!=='none';
+    if(isOpen){ popover.style.display='none'; return; }
+    const input=$('gitContextPathInput');
+    if(input) input.value=_getPinned();
+    const status=$('gitContextStatus');
+    if(status) status.textContent='';
+    popover.style.display='';
+    if(input) input.focus();
+  };
+
+  window.closeGitContextPopover=function(){
+    const p=_popover(); if(p) p.style.display='none';
+  };
+
+  let _debounce=null;
+  window.onGitContextPathInput=function(){
+    const input=$('gitContextPathInput'); if(!input) return;
+    const status=$('gitContextStatus'); if(!status) return;
+    clearTimeout(_debounce);
+    const val=input.value.trim();
+    if(!val){ status.textContent=''; return; }
+    status.textContent='Checking…'; status.className='git-context-status checking';
+    _debounce=setTimeout(async()=>{
+      try{
+        const data=await fetch(`api/git/context?path=${encodeURIComponent(val)}`).then(r=>r.json());
+        if(data.error){ status.textContent='⚠ '+data.error; status.className='git-context-status error'; return; }
+        status.innerHTML=`<span class="git-context-ok">✓ ${esc(data.branch)} · ${data.commits.length} commits${data.dirty.length?' · '+data.dirty.length+' dirty':''}</span>`;
+        status.className='git-context-status ok';
+      }catch(e){ status.textContent='Could not reach server'; status.className='git-context-status error'; }
+    },400);
+  };
+
+  window.confirmGitContextPin=function(){
+    const input=$('gitContextPathInput'); if(!input) return;
+    const val=input.value.trim();
+    _setPinned(val);
+    _updateBtn();
+    closeGitContextPopover();
+    if(val) showToast(`📌 Git context pinned: ${val}`);
+    else showToast('Git context cleared');
+  };
+
+  window.clearGitContextPin=function(){
+    _setPinned('');
+    _updateBtn();
+    closeGitContextPopover();
+    showToast('Git context cleared');
+  };
+
+  // Inject git context block before each outgoing message
+  // Hooked into the existing send() flow via _preSendHooks if available,
+  // otherwise wraps the send function.
+  function _buildContextBlock(data){
+    const lines=[`[Git context: ${data.path}]`,`Branch: ${data.branch}`];
+    if(data.remote) lines.push(`Remote: ${data.remote}`);
+    if(data.commits&&data.commits.length) lines.push('Recent commits:\n'+data.commits.slice(0,5).map(c=>'  '+c).join('\n'));
+    if(data.dirty&&data.dirty.length) lines.push('Uncommitted changes:\n'+data.dirty.slice(0,10).map(f=>'  '+f).join('\n'));
+    return lines.join('\n');
+  }
+
+  // Register a pre-send hook so git context is prepended to the outgoing message.
+  // If _preSendHooks array exists (set up elsewhere), push onto it.
+  // Otherwise patch the global send() after DOMContentLoaded.
+  const _hooks=window._preSendHooks=window._preSendHooks||[];
+  _hooks.push(async function gitContextHook(msgText, options){
+    const pinned=_getPinned();
+    if(!pinned) return msgText;
+    try{
+      const data=await fetch(`api/git/context?path=${encodeURIComponent(pinned)}`).then(r=>r.json());
+      if(data.error) return msgText;
+      return _buildContextBlock(data)+'\n\n'+msgText;
+    }catch(_){ return msgText; }
+  });
+
+  // Initialise button state on load
+  document.addEventListener('DOMContentLoaded',_updateBtn);
+  // Also try immediately in case DOMContentLoaded already fired
+  _updateBtn();
+})();
+
+
 // Chained flow: listen → send → (agent processes) → TTS response → listen again
 (function(){
   const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;

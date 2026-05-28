@@ -577,6 +577,27 @@
                 <path d="M22 10v4"/>
               </svg>
             </button>
+            <!-- Git repo context pin button -->
+            <button class="icon-btn has-tooltip" id="btnGitPin" data-tooltip="Pin git repo as context" onclick="toggleGitContextPin()" style="display:none" title="Pin git repo as context">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 5 5 12"/>
+              </svg>
+            </button>
+            <div id="gitContextPopover" class="git-context-popover" style="display:none">
+              <div class="git-context-header">
+                <span class="git-context-title">📌 Pin git repo context</span>
+                <button type="button" class="icon-btn" style="padding:2px 4px;font-size:12px" onclick="closeGitContextPopover()">✕</button>
+              </div>
+              <div class="git-context-body">
+                <div style="font-size:11px;color:var(--muted);margin-bottom:6px">Absolute path to a local git repo. Its branch, last 10 commits, and dirty status will be injected before each message.</div>
+                <input id="gitContextPathInput" type="text" class="git-context-path-input" placeholder="/path/to/repo" autocomplete="off" oninput="onGitContextPathInput()"/>
+                <div id="gitContextStatus" class="git-context-status"></div>
+                <div class="git-context-actions">
+                  <button type="button" class="detail-form-btn" onclick="confirmGitContextPin()">Pin</button>
+                  <button type="button" class="detail-form-btn secondary" onclick="clearGitContextPin()">Clear</button>
+                </div>
+              </div>
+            </div>
             <div class="composer-divider" aria-hidden="true"></div>
             <button class="yolo-pill" id="yoloPill" type="button" onclick="cmdYolo()" style="display:none" title="YOLO mode — click to disable" data-i18n-title="yolo_pill_title_active">
               <span class="yolo-pill-icon" aria-hidden="true">⚡</span>

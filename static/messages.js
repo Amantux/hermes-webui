@@ -402,6 +402,15 @@ async function send(){
   else if(uploaded.length)msgText=`${text}\n\n[Attached files: ${uploadedPaths.join(', ')}]`;
   if(!msgText){setComposerStatus('Nothing to send');return;}
 
+  // Run pre-send hooks (e.g. git context injection)
+  if(window._preSendHooks&&window._preSendHooks.length){
+    try{
+      for(const hook of window._preSendHooks){
+        msgText=await hook(msgText,{session:S.session})||msgText;
+      }
+    }catch(_){}
+  }
+
   $('msg').value='';autoResize();
   // Clear persisted composer draft since message was sent.
   if (activeSid && typeof _clearComposerDraft === 'function') _clearComposerDraft(activeSid);

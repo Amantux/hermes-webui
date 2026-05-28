@@ -4243,7 +4243,44 @@ def handle_get(handler, parsed) -> bool:
         }
         return j(handler, {"git": info})
 
-    if parsed.path == "/api/commands":
+    if parsed.path == "/api/git/context":
+        # Return concise git context (branch, recent commits, dirty status) for
+        # any given absolute path. Used by the "pin git repo" composer feature.
+        qs = parse_qs(parsed.query)
+        repo_path_raw = qs.get("path", [""])[0].strip()
+        if not repo_path_raw:
+            return bad(handler, "path required")
+        import subprocess as _sp
+        from pathlib import Path as _P
+
+        rp = _P(repo_path_raw)
+        if not rp.exists():
+            return j(handler, {"error": "path does not exist"}, status=404)
+        git_bin = "git"
+        def _git(*args, cwd=None):
+            try:
+                r = _sp.run([git_bin, *args], capture_output=True, text=True,
+                            timeout=5, cwd=str(cwd or rp))
+                return r.stdout.strip() if r.returncode == 0 else None
+            except Exception:
+                return None
+        branch = _git("rev-parse", "--abbrev-ref", "HEAD") or "unknown"
+        if branch == "HEAD":
+            branch = (_git("describe", "--tags", "--exact-match", "HEAD") or
+                      (_git("rev-parse", "--short", "HEAD") or "detached"))
+        commits_raw = _git("log", "--oneline", "-10", "--no-decorate") or ""
+        commits = [l.strip() for l in commits_raw.splitlines() if l.strip()]
+        status_raw = _git("status", "--short") or ""
+        dirty_files = [l.strip() for l in status_raw.splitlines() if l.strip()]
+        remote_url = _git("remote", "get-url", "origin") or ""
+        return j(handler, {
+            "path": str(rp),
+            "branch": branch,
+            "commits": commits,
+            "dirty": dirty_files,
+            "remote": remote_url,
+        })
+
         from api.commands import list_commands
         return j(handler, {"commands": list_commands()})
 
@@ -4379,39 +4416,52 @@ def handle_get(handler, parsed) -> bool:
     # os.environ (process-global) at call time. Wrap in cron_profile_context
     # so the TLS-active profile's jobs.json is read, not the process default.
     if parsed.path == "/api/crons":
-        from cron.jobs import list_jobs
+        try:
+            from cron.jobs import list_jobs
+        except ImportError as _e:
+            return j(handler, {"jobs": [], "unavailable": True, "unavailable_reason": str(_e)})
         from api.profiles import cron_profile_context
 
         with cron_profile_context():
             return j(handler, {"jobs": _cron_jobs_for_api(list_jobs(include_disabled=True))})
 
     if parsed.path == "/api/crons/output":
-        from api.profiles import cron_profile_context
-
+        try:
+            from api.profiles import cron_profile_context
+        except ImportError as _e:
+            return j(handler, {"unavailable": True, "unavailable_reason": str(_e)})
         with cron_profile_context():
             return _handle_cron_output(handler, parsed)
 
     if parsed.path == "/api/crons/history":
-        from api.profiles import cron_profile_context
-
+        try:
+            from api.profiles import cron_profile_context
+        except ImportError as _e:
+            return j(handler, {"unavailable": True, "unavailable_reason": str(_e)})
         with cron_profile_context():
             return _handle_cron_history(handler, parsed)
 
     if parsed.path == "/api/crons/run":
-        from api.profiles import cron_profile_context
-
+        try:
+            from api.profiles import cron_profile_context
+        except ImportError as _e:
+            return j(handler, {"unavailable": True, "unavailable_reason": str(_e)})
         with cron_profile_context():
             return _handle_cron_run_detail(handler, parsed)
 
     if parsed.path == "/api/crons/recent":
-        from api.profiles import cron_profile_context
-
+        try:
+            from api.profiles import cron_profile_context
+        except ImportError as _e:
+            return j(handler, {"completions": [], "unavailable": True, "unavailable_reason": str(_e)})
         with cron_profile_context():
             return _handle_cron_recent(handler, parsed)
 
     if parsed.path == "/api/crons/status":
-        from api.profiles import cron_profile_context
-
+        try:
+            from api.profiles import cron_profile_context
+        except ImportError as _e:
+            return j(handler, {"unavailable": True, "unavailable_reason": str(_e)})
         with cron_profile_context():
             return _handle_cron_status(handler, parsed)
 
@@ -8766,7 +8816,10 @@ def _handle_cron_update(handler, body):
         require(body, "job_id")
     except ValueError as e:
         return bad(handler, str(e))
-    from cron.jobs import update_job
+    try:
+        from cron.jobs import update_job
+    except ImportError as e:
+        return j(handler, {"error": str(e)}, status=503)
 
     try:
         updates = {}
@@ -8790,7 +8843,10 @@ def _handle_cron_delete(handler, body):
         require(body, "job_id")
     except ValueError as e:
         return bad(handler, str(e))
-    from cron.jobs import remove_job
+    try:
+        from cron.jobs import remove_job
+    except ImportError as e:
+        return j(handler, {"error": str(e)}, status=503)
 
     ok = remove_job(body["job_id"])
     if not ok:
@@ -8802,7 +8858,10 @@ def _handle_cron_run(handler, body):
     job_id = body.get("job_id", "")
     if not job_id:
         return bad(handler, "job_id required")
-    from cron.jobs import get_job
+    try:
+        from cron.jobs import get_job
+    except ImportError as e:
+        return j(handler, {"error": str(e)}, status=503)
 
     job = get_job(job_id)
     if not job:
@@ -8837,7 +8896,10 @@ def _handle_cron_pause(handler, body):
     job_id = body.get("job_id", "")
     if not job_id:
         return bad(handler, "job_id required")
-    from cron.jobs import pause_job
+    try:
+        from cron.jobs import pause_job
+    except ImportError as e:
+        return j(handler, {"error": str(e)}, status=503)
 
     result = pause_job(job_id, reason=body.get("reason"))
     if result:
@@ -8849,7 +8911,10 @@ def _handle_cron_resume(handler, body):
     job_id = body.get("job_id", "")
     if not job_id:
         return bad(handler, "job_id required")
-    from cron.jobs import resume_job
+    try:
+        from cron.jobs import resume_job
+    except ImportError as e:
+        return j(handler, {"error": str(e)}, status=503)
 
     result = resume_job(job_id)
     if result:
