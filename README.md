@@ -1,11 +1,20 @@
-# Hermes Web UI
+# Hermes Web UI — Amantux Fork
+
+> **This is `Amantux/hermes-webui`**, a hardened and extended fork of the upstream
+> [`nesquena/hermes-webui`](https://github.com/nesquena/hermes-webui). It ships
+> everything in upstream plus several additional layers: Docker hardening, LAN/network
+> exposure, MCP server configuration (global and per-project), a knowledge graph /
+> notes wiki, WhisperX voice transcription, waiting-input browser notifications,
+> passkey auth, and a modern Geist Contrast default theme.
 
 [Hermes Agent](https://hermes-agent.nousresearch.com/) is a sophisticated autonomous agent that lives on your server, accessed via a terminal or messaging apps, that remembers what it learns and gets more capable the longer it runs.
 
-Hermes WebUI is a lightweight, dark-themed web app interface in your browser for [Hermes Agent](https://hermes-agent.nousresearch.com/).
-Full parity with the CLI experience - everything you can do from a terminal,
+Hermes WebUI is a lightweight web app interface in your browser for [Hermes Agent](https://hermes-agent.nousresearch.com/).
+Full parity with the CLI experience — everything you can do from a terminal,
 you can do from this UI. No build step, no framework, no bundler. Just Python
 and vanilla JS.
+
+Default appearance: **Geist Contrast** skin, **system** theme (follows your OS light/dark preference).
 
 Layout: three-panel. Left sidebar for sessions and navigation, center for chat,
 right for workspace file browsing. Model, profile, and workspace controls live in
@@ -98,7 +107,7 @@ ecosystem. See [docs/why-hermes.md](docs/why-hermes.md) for the full side-by-sid
 Run the repo bootstrap:
 
 ```bash
-git clone https://github.com/nesquena/hermes-webui.git hermes-webui
+git clone https://github.com/Amantux/hermes-webui.git hermes-webui
 cd hermes-webui
 python3 bootstrap.py
 ```
@@ -150,7 +159,7 @@ For a comprehensive setup guide covering all 3 compose files, common failure mod
 The simplest setup: one WebUI container that runs the agent in-process.
 
 ```bash
-git clone https://github.com/nesquena/hermes-webui
+git clone https://github.com/Amantux/hermes-webui
 cd hermes-webui
 cp .env.docker.example .env
 # Edit .env if your host UID isn't 1000 (e.g. macOS where UIDs start at 501)
@@ -170,15 +179,19 @@ docker compose up -d --force-recreate
 ### Manual `docker run` (no compose)
 
 ```bash
-docker pull ghcr.io/nesquena/hermes-webui:latest
+docker pull ghcr.io/amantux/hermes-webui:latest
 docker run -d \
   -e WANTED_UID=$(id -u) -e WANTED_GID=$(id -g) \
   -v ~/.hermes:/home/hermeswebui/.hermes \
   -e HERMES_WEBUI_STATE_DIR=/home/hermeswebui/.hermes/webui \
   -v ~/workspace:/workspace \
-  -p 127.0.0.1:8787:8787 \
-  ghcr.io/nesquena/hermes-webui:latest
+  -p 0.0.0.0:8787:8787 \
+  ghcr.io/amantux/hermes-webui:latest
 ```
+
+> **Network access:** The default bind is `0.0.0.0:8787` so the UI is reachable from
+> any device on your network. To restrict to localhost only, change to `-p 127.0.0.1:8787:8787`
+> and set `HERMES_WEBUI_PASSWORD` to enable auth before exposing externally.
 
 ### Build locally
 
@@ -189,7 +202,7 @@ docker run -d \
   -v ~/.hermes:/home/hermeswebui/.hermes \
   -e HERMES_WEBUI_STATE_DIR=/home/hermeswebui/.hermes/webui \
   -v ~/workspace:/workspace \
-  -p 127.0.0.1:8787:8787 \
+  -p 0.0.0.0:8787:8787 \
   hermes-webui
 ```
 
@@ -388,7 +401,7 @@ Or using the agent venv explicitly:
 
 Tests run against an isolated server with a separate state directory.
 Production data and real cron jobs are never touched. Current snapshot:
-**5303 tests collected** across **488 test files**.
+**~6337 tests collected** across **490+ test files**.
 
 ---
 
@@ -441,7 +454,8 @@ Production data and real cron jobs are never touched. Current snapshot:
 - Syntax highlighted code preview (Prism.js)
 
 ### Voice input
-- Microphone button in the composer (Web Speech API)
+- Microphone button in the composer (Web Speech API for quick in-browser transcription)
+- **WhisperX voice transcription** — high-accuracy speech-to-text via the `/api/transcribe` endpoint; enable by installing WhisperX into the venv or container
 - Tap to record, tap again or send to stop
 - Live interim transcription appears in the textarea
 - Auto-stops after ~2s of silence
@@ -467,6 +481,7 @@ Production data and real cron jobs are never touched. Current snapshot:
 - CDN resources pinned with SRI integrity hashes
 
 ### Themes
+- Default appearance: **Geist Contrast** skin, **system** theme (follows OS light/dark preference automatically)
 - Appearance is split into two axes: Theme (`system`, `dark`, `light`) and Skin
   (`default`, `ares`, `mono`, `slate`, `poseidon`, `sisyphus`, `charizard`,
   `sienna`, `catppuccin`, `nous`, `geist-contrast` / Geist Contrast)
@@ -474,6 +489,18 @@ Production data and real cron jobs are never touched. Current snapshot:
 - Persists across reloads (server-side in settings.json + localStorage for flicker-free loading)
 - Skins use `data-skin` plus CSS variables; dark mode resolves through the
   `.dark` class, not a `data-theme` custom-theme axis — see [THEMES.md](THEMES.md)
+
+### MCP server configuration
+- Configure MCP (Model Context Protocol) servers globally or per-project from the **Hermes Control Center → MCP tab**
+- Global configs apply to all sessions; project configs are scoped to a workspace directory
+- Settings are stored in `~/.hermes/webui/mcp_servers.json` (global) and `<workspace>/.hermes/mcp_servers.json` (per-project)
+- Supports stdio and SSE transport types
+
+### Notes and knowledge graph
+- Per-session and global notes stored as Markdown in `~/.hermes/webui/notes/`
+- Link notes to sessions, workspace files, and projects
+- Browse and search the notes wiki from the **Notes panel** in the sidebar
+- Structured knowledge graph allows tagging notes with entities and relationships for agent memory augmentation
 
 ### Settings and configuration
 - **Hermes Control Center** (sidebar launcher button) -- Conversation tab (export/import/clear), Preferences tab (model, send key, theme, language, all toggles), System tab (version, password)
@@ -694,5 +721,5 @@ Configurable assistant display name, thinking/reasoning block display, and a log
 ## Repo
 
 ```
-git@github.com:nesquena/hermes-webui.git
+git@github.com:Amantux/hermes-webui.git
 ```

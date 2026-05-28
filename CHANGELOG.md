@@ -3,6 +3,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Child session close button**: Each child session row in the sidebar now has a hover-reveal `×` button that archives the child session via `POST /api/session/archive` without leaving the parent session or closing other sessions.
+- **Live usage estimation functions**: `live_usage_prompt_estimate_after_tool_delta()` and `_bounded_live_tool_prompt_delta()` added as module-level functions in `api/streaming.py` — testable, importable, and used to estimate mid-turn prompt growth from tool results. Per-call cap: 12,000 tokens; per-turn cap: 24,000 tokens.
+- **MCP server configuration section** in README and Features list.
+- **Notes/knowledge graph section** in README and Features list.
+- **WhisperX voice transcription** noted in README Voice input section.
+
 ### Fixed
 
 - **Model routing**: `model_with_provider_context()` now wraps slash-qualified model IDs as `@provider:model` when an explicit non-default provider is set, preventing `resolve_model_provider()` from misrouting them via OpenRouter cross-provider heuristics (e.g. `google/recurrentgemma-2b` on `ollama-cloud` now routes correctly).

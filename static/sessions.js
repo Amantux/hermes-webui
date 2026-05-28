@@ -3497,6 +3497,22 @@ function renderSessionListFromCache(){
           await loadSession(child.session_id);
           renderSessionListFromCache();
         };
+        // Close button — archives the child session without leaving the parent
+        const closeBtn=document.createElement('button');
+        closeBtn.type='button';
+        closeBtn.className='session-child-close';
+        closeBtn.textContent='×';
+        closeBtn.title='Close child session';
+        closeBtn.onclick=async(e)=>{
+          e.stopPropagation();
+          try{
+            await api('/api/session/archive',{method:'POST',body:JSON.stringify({session_id:child.session_id,archived:true})});
+            renderSessionListFromCache();
+          }catch(err){
+            if(typeof showToast==='function') showToast('Could not close child session.',3000);
+          }
+        };
+        row.appendChild(closeBtn);
         childList.appendChild(row);
       }
       sessionText.appendChild(childList);

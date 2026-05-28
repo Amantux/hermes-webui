@@ -2834,7 +2834,72 @@ def _partial_marker_already_present(messages, candidate: dict, *, before_idx: in
     return False
 
 
-def _sse(handler, event, data):
+
+# ─── Live usage estimation (module-level, testable) ─────────────────────────
+#
+# These helpers estimate prompt-token growth during mid-turn tool execution
+# without blocking on an exact model-reported value.
+
+_LIVE_TOOL_PROMPT_CAP_PER_CALL: int = 12_000  # max tokens credited per tool call
+_LIVE_TOOL_PROMPT_CAP_PER_TURN: int = 24_000  # max cumulative delta credited per turn
+
+
+def _bounded_live_tool_prompt_delta(messages: list, cap: int = _LIVE_TOOL_PROMPT_CAP_PER_CALL) -> int:
+    """Estimate token growth from new tool messages, capped at *cap*.
+
+    Uses ``agent.model_metadata.estimate_messages_tokens_rough`` when available;
+    falls back to a simple char-count heuristic so tests and environments without
+    the agent package still work.
+    """
+    if not messages:
+        return 0
+    try:
+        from agent.model_metadata import estimate_messages_tokens_rough
+        delta = int(estimate_messages_tokens_rough(messages) or 0)
+    except Exception:
+        total_chars = sum(
+            len(str(m.get('content') or ''))
+            for m in messages
+            if isinstance(m, dict)
+        )
+        delta = total_chars // 4
+    return min(delta, int(cap or 0))
+
+
+def live_usage_prompt_estimate_after_tool_delta(
+    base_prompt_tokens: int,
+    exact_prompt_tokens: int,
+    messages: list,
+    turn_tool_prompt_tokens: int = 0,
+    *,
+    turn_cap: int = _LIVE_TOOL_PROMPT_CAP_PER_TURN,
+) -> dict:
+    """Estimate prompt size after a mid-turn tool result is appended.
+
+    Returns a dict with:
+    - ``last_prompt_tokens``: best estimate for the next LLM call's prompt size
+    - ``turn_tool_prompt_tokens``: cumulative tool-result tokens added this turn
+
+    When *exact_prompt_tokens* has advanced past *base_prompt_tokens* (the LLM
+    already made another call and reported an exact value), that exact value is
+    used directly and the per-turn accumulator resets to zero.
+    """
+    base = int(base_prompt_tokens or 0)
+    exact = int(exact_prompt_tokens or 0)
+    turn_tool = int(turn_tool_prompt_tokens or 0)
+
+    if exact > base:
+        return {'last_prompt_tokens': exact, 'turn_tool_prompt_tokens': 0}
+
+    delta = _bounded_live_tool_prompt_delta(messages)
+    new_turn_tool = min(turn_tool + delta, int(turn_cap or 0))
+    return {
+        'last_prompt_tokens': base + new_turn_tool,
+        'turn_tool_prompt_tokens': new_turn_tool,
+    }
+
+
+
     """Write one SSE event to the response stream."""
     payload = f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
     handler.wfile.write(payload.encode('utf-8'))
