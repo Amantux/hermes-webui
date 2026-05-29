@@ -456,6 +456,7 @@ Production data and real cron jobs are never touched. Current snapshot:
 ### Voice input
 - Microphone button in the composer (Web Speech API for quick in-browser transcription)
 - **WhisperX voice transcription** — high-accuracy speech-to-text via the `/api/transcribe` endpoint; enable by installing WhisperX into the venv or container
+- Transcription backend is selectable via `HERMES_WEBUI_TRANSCRIPTION_PROVIDER` (`legacy`, `whisperx`, `auto`) or `settings.json` key `transcription_provider`; WhisperX mode gracefully falls back to legacy transcription if WhisperX is unavailable
 - Tap to record, tap again or send to stop
 - Live interim transcription appears in the textarea
 - Auto-stops after ~2s of silence
@@ -493,14 +494,15 @@ Production data and real cron jobs are never touched. Current snapshot:
 ### MCP server configuration
 - Configure MCP (Model Context Protocol) servers globally or per-project from the **Hermes Control Center → MCP tab**
 - Global configs apply to all sessions; project configs are scoped to a workspace directory
-- Settings are stored in `~/.hermes/webui/mcp_servers.json` (global) and `<workspace>/.hermes/mcp_servers.json` (per-project)
+- Scope resolution order is: **project override → global profile config → runtime defaults**
+- Project-scoped settings are stored in `<workspace>/.hermes/webui.project.yaml` under `mcp_servers`
 - Supports stdio and SSE transport types
 
 ### Notes and knowledge graph
-- Per-session and global notes stored as Markdown in `~/.hermes/webui/notes/`
-- Link notes to sessions, workspace files, and projects
-- Browse and search the notes wiki from the **Notes panel** in the sidebar
-- Structured knowledge graph allows tagging notes with entities and relationships for agent memory augmentation
+- LLM wiki status, page listing, search, page read, and graph extraction are exposed via WebUI-backed APIs
+- Wiki scope can be resolved from project config (`<workspace>/.hermes/webui.project.yaml`), then global profile config/env, then default path
+- Graph view is exposed in the Insights knowledge surface with node/edge counts and indexed page preview
+- Memory and skills now support global/project-effective behavior (project overrides global for effective scope)
 
 ### Settings and configuration
 - **Hermes Control Center** (sidebar launcher button) -- Conversation tab (export/import/clear), Preferences tab (model, send key, theme, language, all toggles), System tab (version, password)

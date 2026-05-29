@@ -107,6 +107,79 @@ def _all_profiles_query_flag(parsed_url) -> bool:
     return raw in ('1', 'true', 'yes', 'on')
 
 
+def _normalize_scope(scope: str | None) -> str:
+    raw = (scope or "").strip().lower()
+    return raw if raw in {"global", "project", "effective"} else "effective"
+
+
+def _workspace_from_request(parsed=None, body: dict | None = None) -> str | None:
+    body = body if isinstance(body, dict) else {}
+    workspace = str(body.get("workspace") or "").strip()
+    if workspace:
+        try:
+            return str(resolve_trusted_workspace(workspace))
+        except Exception:
+            return None
+    session_id = str(body.get("session_id") or "").strip()
+    qs = parse_qs(parsed.query) if parsed is not None else {}
+    if not session_id:
+        session_id = (qs.get("session_id", [""])[0] or "").strip()
+    if session_id:
+        try:
+            s = get_session(session_id)
+            return str(resolve_trusted_workspace(s.workspace))
+        except Exception:
+            return None
+    workspace_qs = (qs.get("workspace", [""])[0] or "").strip()
+    if workspace_qs:
+        try:
+            return str(resolve_trusted_workspace(workspace_qs))
+        except Exception:
+            return None
+    return None
+
+
+def _project_config_path_for_workspace(workspace: str | Path | None) -> Path | None:
+    if not workspace:
+        return None
+    try:
+        root = resolve_trusted_workspace(str(workspace))
+    except Exception:
+        return None
+    return Path(root) / ".hermes" / "webui.project.yaml"
+
+
+def _load_project_config_for_workspace(workspace: str | Path | None) -> dict:
+    p = _project_config_path_for_workspace(workspace)
+    if p is None or not p.exists() or not p.is_file():
+        return {}
+    try:
+        data = _load_yaml_config_file(p)
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _save_project_config_for_workspace(workspace: str | Path | None, cfg: dict) -> Path:
+    p = _project_config_path_for_workspace(workspace)
+    if p is None:
+        raise ValueError("workspace is required for project scope")
+    p.parent.mkdir(parents=True, exist_ok=True)
+    _save_yaml_config_file(p, cfg if isinstance(cfg, dict) else {})
+    return p
+
+
+def _scope_and_workspace_from_request(parsed=None, body: dict | None = None) -> tuple[str, str | None]:
+    body = body if isinstance(body, dict) else {}
+    scope = _normalize_scope(body.get("scope"))
+    if parsed is not None:
+        qs = parse_qs(parsed.query)
+        if "scope" in qs and not str(body.get("scope", "")).strip():
+            scope = _normalize_scope(qs.get("scope", [""])[0])
+    workspace = _workspace_from_request(parsed=parsed, body=body)
+    return scope, workspace
+
+
 def _active_skills_dir() -> Path:
     """Return the skills directory for the request's active Hermes profile.
 
@@ -2738,13 +2811,29 @@ def _llm_wiki_config_path() -> str | None:
 # Cap WIKI walks to prevent self-DoS if WIKI_PATH points at /, /etc, /home, etc.
 # Real LLM wikis have under a few thousand files; 10k is generous and catches misconfig.
 _LLM_WIKI_MAX_FILES = 10000
+_LLM_WIKI_MAX_PAGE_BYTES = 512 * 1024
 # Refuse to walk these system roots even if explicitly configured.
 _LLM_WIKI_FORBIDDEN_ROOTS = frozenset(
     str(Path(p).expanduser().resolve()) for p in ("/", "/etc", "/usr", "/var", "/opt", "/sys", "/proc")
 )
 
 
-def _llm_wiki_resolve_path() -> tuple[Path, str, bool]:
+def _llm_wiki_resolve_path(workspace: str | None = None, scope: str = "effective") -> tuple[Path, str, bool]:
+    scope = _normalize_scope(scope)
+    project_cfg = _load_project_config_for_workspace(workspace) if workspace else {}
+    project_wiki = None
+    if isinstance(project_cfg, dict):
+        project_wiki_cfg = project_cfg.get("wiki", {})
+        if isinstance(project_wiki_cfg, dict):
+            project_wiki = project_wiki_cfg.get("path")
+    if scope in {"project", "effective"} and project_wiki:
+        raw = str(project_wiki).strip()
+        if raw:
+            return Path(os.path.expandvars(raw)).expanduser(), "project.wiki.path", True
+    if scope == "project":
+        if workspace:
+            return Path(workspace).expanduser() / ".hermes" / "wiki", "workspace_default", False
+        return Path("~/wiki").expanduser(), "workspace_default", False
     hermes_home = _llm_wiki_active_hermes_home()
     raw = os.getenv("WIKI_PATH") or _llm_wiki_env_file_path(hermes_home)
     source = "WIKI_PATH" if raw else "default"
@@ -2820,10 +2909,10 @@ def _llm_wiki_page_files(wiki_path: Path) -> list[Path]:
     return pages
 
 
-def _build_llm_wiki_status() -> dict:
+def _build_llm_wiki_status(scope: str = "effective", workspace: str | None = None) -> dict:
     """Return private-safe LLM Wiki status metadata without reading page bodies."""
     try:
-        wiki_path, path_source, path_configured = _llm_wiki_resolve_path()
+        wiki_path, path_source, path_configured = _llm_wiki_resolve_path(workspace=workspace, scope=scope)
         base = {
             "available": False,
             "enabled": False,
@@ -2835,6 +2924,8 @@ def _build_llm_wiki_status() -> dict:
             "last_writer": None,
             "path_configured": path_configured,
             "path_source": path_source,
+            "scope": scope,
+            "workspace": workspace,
             "toggle_available": False,
             "toggle_reason": "Hermes Agent exposes WIKI_PATH/wiki.path for location, but no stable on/off config flag is currently available.",
             "docs_url": _LLM_WIKI_DOCS_URL,
@@ -2886,7 +2977,216 @@ def _build_llm_wiki_status() -> dict:
 
 
 def _handle_llm_wiki_status(handler, parsed) -> bool:
-    j(handler, _build_llm_wiki_status())
+    scope, workspace = _scope_and_workspace_from_request(parsed=parsed, body=None)
+    j(handler, _build_llm_wiki_status(scope=scope, workspace=workspace))
+    return True
+
+
+def _llm_wiki_resolved_root(parsed) -> tuple[Path, str, str | None, str, bool]:
+    scope, workspace = _scope_and_workspace_from_request(parsed=parsed, body=None)
+    root, path_source, path_configured = _llm_wiki_resolve_path(workspace=workspace, scope=scope)
+    return root, scope, workspace, path_source, path_configured
+
+
+def _wiki_relpath(root: Path, item: Path) -> str:
+    return str(item.resolve().relative_to(root.resolve()))
+
+
+def _handle_llm_wiki_pages(handler, parsed) -> bool:
+    root, scope, workspace, path_source, path_configured = _llm_wiki_resolved_root(parsed)
+    provenance = {
+        "scope": scope,
+        "workspace": workspace,
+        "wiki_path": str(root),
+        "path_source": path_source,
+        "path_configured": path_configured,
+    }
+    if not root.exists() or not root.is_dir():
+        j(handler, {"pages": [], "scope": scope, "workspace": workspace, "wiki_path": str(root), "total": 0, "provenance": provenance})
+        return True
+    pages = _llm_wiki_page_files(root)
+    rows = []
+    for item in sorted(pages):
+        try:
+            rel_path = _wiki_relpath(root, item)
+            rows.append(
+                {
+                    "path": rel_path,
+                    "mtime": item.stat().st_mtime,
+                    "provenance": {
+                        "type": "wiki_page",
+                        "page_path": rel_path,
+                    },
+                }
+            )
+        except Exception:
+            continue
+    j(handler, {"pages": rows, "scope": scope, "workspace": workspace, "wiki_path": str(root), "total": len(rows), "provenance": provenance})
+    return True
+
+
+def _handle_llm_wiki_search(handler, parsed) -> bool:
+    qs = parse_qs(parsed.query)
+    q = (qs.get("q", [""])[0] or "").strip().lower()
+    limit_raw = qs.get("limit", ["40"])[0]
+    try:
+        limit = min(max(int(limit_raw), 1), 200)
+    except Exception:
+        limit = 40
+    root, scope, workspace, path_source, path_configured = _llm_wiki_resolved_root(parsed)
+    provenance = {
+        "scope": scope,
+        "workspace": workspace,
+        "wiki_path": str(root),
+        "path_source": path_source,
+        "path_configured": path_configured,
+        "query": q,
+    }
+    if not q or not root.exists() or not root.is_dir():
+        j(handler, {"results": [], "query": q, "scope": scope, "workspace": workspace, "wiki_path": str(root), "provenance": provenance})
+        return True
+    results = []
+    for item in sorted(_llm_wiki_page_files(root)):
+        if len(results) >= limit:
+            break
+        try:
+            text = item.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        lower = text.lower()
+        pos = lower.find(q)
+        if pos < 0:
+            continue
+        start = max(0, pos - 80)
+        end = min(len(text), pos + 160)
+        snippet = text[start:end].replace("\n", " ").strip()
+        rel_path = _wiki_relpath(root, item)
+        results.append(
+            {
+                "path": rel_path,
+                "snippet": _redact_text(snippet),
+                "provenance": {
+                    "type": "wiki_search_match",
+                    "page_path": rel_path,
+                    "query": q,
+                },
+            }
+        )
+    j(handler, {"results": results, "query": q, "scope": scope, "workspace": workspace, "wiki_path": str(root), "provenance": provenance})
+    return True
+
+
+def _handle_llm_wiki_page(handler, parsed) -> bool:
+    qs = parse_qs(parsed.query)
+    rel = (qs.get("path", [""])[0] or "").strip()
+    if not rel:
+        return bad(handler, "path is required")
+    root, scope, workspace, path_source, path_configured = _llm_wiki_resolved_root(parsed)
+    try:
+        if str(root.resolve()) in _LLM_WIKI_FORBIDDEN_ROOTS:
+            return bad(handler, "wiki path is blocked for safety", 400)
+    except Exception:
+        return bad(handler, "wiki path could not be resolved safely", 400)
+    try:
+        target = safe_resolve(root, rel)
+    except Exception as exc:
+        return bad(handler, _sanitize_error(exc), 400)
+    if not target.exists() or not target.is_file():
+        return bad(handler, "page not found", 404)
+    if target.suffix.lower() != ".md":
+        return bad(handler, "only markdown pages are allowed", 400)
+    try:
+        st = target.stat()
+        if st.st_size > _LLM_WIKI_MAX_PAGE_BYTES:
+            return bad(handler, "page exceeds max allowed size", 413)
+    except Exception:
+        return bad(handler, "failed to inspect page size", 500)
+    try:
+        content = target.read_text(encoding="utf-8", errors="replace")
+    except Exception as exc:
+        return bad(handler, _sanitize_error(exc), 500)
+    j(
+        handler,
+        {
+            "path": _wiki_relpath(root, target),
+            "content": _redact_text(content),
+            "scope": scope,
+            "workspace": workspace,
+            "wiki_path": str(root),
+            "provenance": {
+                "type": "wiki_page",
+                "path_source": path_source,
+                "path_configured": path_configured,
+                "scope": scope,
+                "workspace": workspace,
+            },
+        },
+    )
+    return True
+
+
+def _handle_llm_wiki_graph(handler, parsed) -> bool:
+    qs = parse_qs(parsed.query)
+    try:
+        max_nodes = min(max(int(qs.get("max_nodes", ["200"])[0]), 1), 1000)
+        max_edges = min(max(int(qs.get("max_edges", ["600"])[0]), 1), 5000)
+    except Exception:
+        max_nodes, max_edges = 200, 600
+    root, scope, workspace, path_source, path_configured = _llm_wiki_resolved_root(parsed)
+    nodes = []
+    edges = []
+    node_set = set()
+    for item in sorted(_llm_wiki_page_files(root)):
+        if len(nodes) >= max_nodes:
+            break
+        try:
+            rel = _wiki_relpath(root, item)
+            text = item.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        node_set.add(rel)
+        nodes.append({"id": rel, "label": Path(rel).stem, "provenance": {"type": "wiki_page", "page_path": rel}})
+        for link in re.findall(r"\[\[([^\]]+)\]\]", text):
+            target = (link or "").strip()
+            if not target:
+                continue
+            if not target.endswith(".md"):
+                target = target + ".md"
+            if len(edges) >= max_edges:
+                break
+            edges.append(
+                {
+                    "source": rel,
+                    "target": target,
+                    "type": "wikilink",
+                    "provenance": {
+                        "type": "wikilink",
+                        "source_path": rel,
+                        "target_path": target,
+                    },
+                }
+            )
+        if len(edges) >= max_edges:
+            break
+    j(
+        handler,
+        {
+            "nodes": nodes,
+            "edges": edges[:max_edges],
+            "scope": scope,
+            "workspace": workspace,
+            "wiki_path": str(root),
+            "provenance": {
+                "scope": scope,
+                "workspace": workspace,
+                "wiki_path": str(root),
+                "path_source": path_source,
+                "path_configured": path_configured,
+                "max_nodes": max_nodes,
+                "max_edges": max_edges,
+            },
+        },
+    )
     return True
 
 
@@ -3590,6 +3890,14 @@ def handle_get(handler, parsed) -> bool:
         return True
     if parsed.path == "/api/wiki/status":
         return _handle_llm_wiki_status(handler, parsed)
+    if parsed.path == "/api/wiki/pages":
+        return _handle_llm_wiki_pages(handler, parsed)
+    if parsed.path == "/api/wiki/search":
+        return _handle_llm_wiki_search(handler, parsed)
+    if parsed.path == "/api/wiki/page":
+        return _handle_llm_wiki_page(handler, parsed)
+    if parsed.path == "/api/wiki/graph":
+        return _handle_llm_wiki_graph(handler, parsed)
     if parsed.path == "/api/logs":
         return _handle_logs(handler, parsed)
 
@@ -4469,8 +4777,11 @@ def handle_get(handler, parsed) -> bool:
     if parsed.path == "/api/skills":
         qs = parse_qs(parsed.query)
         category = qs.get("category", [None])[0]
+        scope = _normalize_scope(qs.get("scope", [""])[0] if qs.get("scope") else "effective")
+        workspace = _workspace_from_request(parsed=parsed, body=None)
         data = _skills_list_from_dir(_active_skills_dir(), category=category)
-        return j(handler, {"skills": data.get("skills", [])})
+        skills = _apply_skills_scope(data.get("skills", []), scope, workspace)
+        return j(handler, {"skills": skills, "scope": scope, "workspace": workspace})
 
     if parsed.path == "/api/skills/content":
         qs = parse_qs(parsed.query)
@@ -4508,7 +4819,7 @@ def handle_get(handler, parsed) -> bool:
 
     # ── Memory API (GET) ──
     if parsed.path == "/api/memory":
-        return _handle_memory_read(handler)
+        return _handle_memory_read(handler, parsed)
 
     # ── Profile API (GET) ──
     if parsed.path == "/api/profiles":
@@ -4595,11 +4906,11 @@ def handle_get(handler, parsed) -> bool:
 
     # ── MCP Servers (GET) ──
     if parsed.path == "/api/mcp/servers":
-        return _handle_mcp_servers_list(handler)
+        return _handle_mcp_servers_list(handler, parsed)
 
     # ── MCP Tools (GET) ──
     if parsed.path == "/api/mcp/tools":
-        return _handle_mcp_tools_list(handler)
+        return _handle_mcp_tools_list(handler, parsed)
 
     # ── Checkpoints / Rollback (GET) ──
     if parsed.path == "/api/rollback/list":
@@ -5547,6 +5858,13 @@ def handle_post(handler, parsed) -> bool:
     # ── Memory (POST) ──
     if parsed.path == "/api/memory/write":
         return _handle_memory_write(handler, body)
+
+    # ── MCP Servers (POST) ──
+    if parsed.path == "/api/mcp/server/save":
+        return _handle_mcp_server_save(handler, body)
+
+    if parsed.path == "/api/mcp/server/delete":
+        return _handle_mcp_server_delete_by_body(handler, body)
 
     # ── Profile API (POST) ──
     if parsed.path == "/api/profile/switch":
@@ -7891,7 +8209,99 @@ def _handle_cron_recent(handler, parsed):
         return j(handler, {"completions": [], "since": since})
 
 
-def _handle_memory_read(handler):
+def _skills_overlay_for_workspace(workspace: str | None) -> tuple[set[str], set[str]]:
+    if not workspace:
+        return set(), set()
+    cfg = _load_project_config_for_workspace(workspace)
+    skills_cfg = cfg.get("skills", {})
+    if not isinstance(skills_cfg, dict):
+        return set(), set()
+    disabled = skills_cfg.get("disabled", [])
+    enabled = skills_cfg.get("enabled", [])
+    disabled_set = {str(x).strip() for x in disabled if str(x).strip()} if isinstance(disabled, list) else set()
+    enabled_set = {str(x).strip() for x in enabled if str(x).strip()} if isinstance(enabled, list) else set()
+    return disabled_set, enabled_set
+
+
+def _apply_skills_scope(skills: list[dict], scope: str, workspace: str | None) -> list[dict]:
+    if scope == "global":
+        return skills
+    disabled_set, enabled_set = _skills_overlay_for_workspace(workspace)
+    if scope == "project" and not workspace:
+        return skills
+    out = []
+    for skill in skills:
+        row = dict(skill)
+        name = str(row.get("name") or "").strip()
+        if scope == "project":
+            row["disabled"] = bool(name in disabled_set and name not in enabled_set)
+        else:
+            # effective: project overrides global
+            if name in enabled_set:
+                row["disabled"] = False
+            elif name in disabled_set:
+                row["disabled"] = True
+        out.append(row)
+    return out
+
+
+def _memory_overlay_for_workspace(workspace: str | None) -> dict:
+    if not workspace:
+        return {}
+    cfg = _load_project_config_for_workspace(workspace)
+    memory_cfg = cfg.get("memory", {})
+    return memory_cfg if isinstance(memory_cfg, dict) else {}
+
+
+def _effective_memory_payload(global_payload: dict, scope: str, workspace: str | None) -> dict:
+    if scope == "global":
+        payload = dict(global_payload)
+        payload["scope"] = "global"
+        return payload
+    overlay = _memory_overlay_for_workspace(workspace)
+    mode = str(overlay.get("mode") or "append").strip().lower()
+    mode = mode if mode in {"append", "override"} else "append"
+    project_memory = str(overlay.get("memory") or "")
+    project_user = str(overlay.get("user") or "")
+    project_soul = str(overlay.get("soul") or "")
+    if scope == "project":
+        return {
+            "memory": _redact_text(project_memory),
+            "user": _redact_text(project_user),
+            "soul": _redact_text(project_soul),
+            "memory_path": str(_project_config_path_for_workspace(workspace) or ""),
+            "user_path": str(_project_config_path_for_workspace(workspace) or ""),
+            "soul_path": str(_project_config_path_for_workspace(workspace) or ""),
+            "memory_mtime": None,
+            "user_mtime": None,
+            "soul_mtime": None,
+            "scope": "project",
+            "workspace": workspace,
+            "overlay_mode": mode,
+        }
+    payload = dict(global_payload)
+    if mode == "override":
+        if project_memory:
+            payload["memory"] = _redact_text(project_memory)
+        if project_user:
+            payload["user"] = _redact_text(project_user)
+        if project_soul:
+            payload["soul"] = _redact_text(project_soul)
+    else:
+        if project_memory:
+            payload["memory"] = _redact_text((payload.get("memory") or "") + "\n\n" + project_memory if payload.get("memory") else project_memory)
+        if project_user:
+            payload["user"] = _redact_text((payload.get("user") or "") + "\n\n" + project_user if payload.get("user") else project_user)
+        if project_soul:
+            payload["soul"] = _redact_text((payload.get("soul") or "") + "\n\n" + project_soul if payload.get("soul") else project_soul)
+    payload["scope"] = "effective"
+    payload["workspace"] = workspace
+    payload["overlay_mode"] = mode
+    return payload
+
+
+def _handle_memory_read(handler, parsed=None):
+    scope, workspace = _scope_and_workspace_from_request(parsed=parsed, body=None)
     try:
         from api.profiles import get_active_hermes_home
 
@@ -7918,20 +8328,18 @@ def _handle_memory_read(handler):
         if soul_file.exists()
         else ""
     )
-    return j(
-        handler,
-        {
-            "memory": _redact_text(memory),
-            "user": _redact_text(user),
-            "soul": _redact_text(soul),
-            "memory_path": str(mem_file),
-            "user_path": str(user_file),
-            "soul_path": str(soul_file),
-            "memory_mtime": mem_file.stat().st_mtime if mem_file.exists() else None,
-            "user_mtime": user_file.stat().st_mtime if user_file.exists() else None,
-            "soul_mtime": soul_file.stat().st_mtime if soul_file.exists() else None,
-        },
-    )
+    payload = {
+        "memory": _redact_text(memory),
+        "user": _redact_text(user),
+        "soul": _redact_text(soul),
+        "memory_path": str(mem_file),
+        "user_path": str(user_file),
+        "soul_path": str(soul_file),
+        "memory_mtime": mem_file.stat().st_mtime if mem_file.exists() else None,
+        "user_mtime": user_file.stat().st_mtime if user_file.exists() else None,
+        "soul_mtime": soul_file.stat().st_mtime if soul_file.exists() else None,
+    }
+    return j(handler, _effective_memory_payload(payload, scope, workspace))
 
 
 # ── POST route helpers ────────────────────────────────────────────────────────
@@ -11061,6 +11469,41 @@ def _handle_skill_toggle(handler, body):
 
     name = body["name"].strip()
     enabled = bool(body["enabled"])
+    scope = _normalize_scope(body.get("scope"))
+    workspace = _workspace_from_request(body=body)
+
+    if scope == "project":
+        if not workspace:
+            return bad(handler, "workspace is required for project scope")
+        cfg = _load_project_config_for_workspace(workspace)
+        skills_cfg = cfg.get("skills", {})
+        if not isinstance(skills_cfg, dict):
+            skills_cfg = {}
+        disabled = _normalize_names_list(skills_cfg.get("disabled"))
+        enabled_list = _normalize_names_list(skills_cfg.get("enabled"))
+        if enabled:
+            disabled = [n for n in disabled if n != name]
+            if name not in enabled_list:
+                enabled_list.append(name)
+        else:
+            enabled_list = [n for n in enabled_list if n != name]
+            if name not in disabled:
+                disabled.append(name)
+        skills_cfg["disabled"] = disabled
+        skills_cfg["enabled"] = enabled_list
+        cfg["skills"] = skills_cfg
+        path = _save_project_config_for_workspace(workspace, cfg)
+        return j(
+            handler,
+            {
+                "ok": True,
+                "name": name,
+                "enabled": enabled,
+                "scope": "project",
+                "workspace": workspace,
+                "project_config_path": str(path),
+            },
+        )
 
     # Validate the skill exists in the filesystem
     skills_dir = _active_skills_dir()
@@ -11097,7 +11540,7 @@ def _handle_skill_toggle(handler, body):
 
     reload_config()  # outside with block — reload_config() acquires the lock itself
 
-    return j(handler, {"ok": True, "name": name, "enabled": enabled})
+    return j(handler, {"ok": True, "name": name, "enabled": enabled, "scope": "global"})
 
 
 def _handle_memory_write(handler, body):
@@ -11105,6 +11548,33 @@ def _handle_memory_write(handler, body):
         require(body, "section", "content")
     except ValueError as e:
         return bad(handler, str(e))
+    scope = _normalize_scope(body.get("scope"))
+    workspace = _workspace_from_request(body=body)
+    if scope == "project":
+        if not workspace:
+            return bad(handler, "workspace is required for project scope")
+        cfg = _load_project_config_for_workspace(workspace)
+        mem_cfg = cfg.get("memory", {})
+        if not isinstance(mem_cfg, dict):
+            mem_cfg = {}
+        section = body["section"]
+        if section not in {"memory", "user", "soul"}:
+            return bad(handler, 'section must be "memory", "user", or "soul"')
+        mem_cfg[section] = body["content"]
+        mode = str(body.get("mode") or mem_cfg.get("mode") or "override").strip().lower()
+        mem_cfg["mode"] = mode if mode in {"append", "override"} else "override"
+        cfg["memory"] = mem_cfg
+        path = _save_project_config_for_workspace(workspace, cfg)
+        return j(
+            handler,
+            {
+                "ok": True,
+                "section": section,
+                "scope": "project",
+                "workspace": workspace,
+                "project_config_path": str(path),
+            },
+        )
     try:
         from api.profiles import get_active_hermes_home
 
@@ -11124,7 +11594,7 @@ def _handle_memory_write(handler, body):
     else:
         return bad(handler, 'section must be "memory", "user", or "soul"')
     target.write_text(body["content"], encoding="utf-8")
-    return j(handler, {"ok": True, "section": section, "path": str(target)})
+    return j(handler, {"ok": True, "section": section, "scope": "global", "path": str(target)})
 
 
 def _normalize_message_for_import_refresh(message: object) -> object:
@@ -11670,17 +12140,50 @@ def _mcp_tools_from_registry(server_summaries):
     return tools
 
 
-def _handle_mcp_tools_list(handler):
+def _effective_mcp_servers(merged_cfg: dict, workspace: str | None, scope: str) -> tuple[dict, dict]:
+    """Return effective MCP server map plus per-server source metadata."""
+    global_servers = merged_cfg.get("mcp_servers", {})
+    if not isinstance(global_servers, dict):
+        global_servers = {}
+    if scope == "global":
+        return dict(global_servers), {str(k): "global" for k in global_servers.keys()}
+    project_cfg = _load_project_config_for_workspace(workspace) if workspace else {}
+    project_servers = project_cfg.get("mcp_servers", {})
+    if not isinstance(project_servers, dict):
+        project_servers = {}
+    if scope == "project":
+        project_only = {
+            str(name): cfg for name, cfg in project_servers.items()
+            if isinstance(cfg, dict)
+        }
+        return project_only, {str(k): "project" for k in project_only.keys()}
+    # effective scope: project override > global
+    effective = dict(global_servers)
+    source = {str(k): "global" for k in global_servers.keys()}
+    for name, cfg in project_servers.items():
+        key = str(name)
+        if cfg is None:
+            effective.pop(key, None)
+            source[key] = "project_disabled"
+            continue
+        if isinstance(cfg, dict):
+            effective[key] = cfg
+            source[key] = "project"
+    return effective, source
+
+
+def _handle_mcp_tools_list(handler, parsed=None):
     """List known MCP tools from already-available runtime inventory only."""
+    scope, workspace = _scope_and_workspace_from_request(parsed=parsed, body=None)
     cfg = get_config()
-    servers = cfg.get("mcp_servers", {})
-    if not isinstance(servers, dict):
-        servers = {}
+    servers, source_by_server = _effective_mcp_servers(cfg, workspace, scope)
     runtime = _mcp_runtime_status_by_name()
     server_summaries = {
         str(name): _server_summary(str(name), scfg, runtime.get(str(name)))
         for name, scfg in servers.items()
     }
+    for server_name, summary in server_summaries.items():
+        summary["scope_source"] = source_by_server.get(server_name, "global")
     tools = _mcp_tools_from_runtime_status(runtime, server_summaries)
     source = "mcp_runtime_status"
     if not tools:
@@ -11697,24 +12200,29 @@ def _handle_mcp_tools_list(handler):
         "source": source,
         "inventory_scope": "already_known_runtime_only",
         "unavailable_servers": unavailable_servers,
+        "scope": scope,
+        "workspace": workspace,
     })
 
 
-def _handle_mcp_servers_list(handler):
+def _handle_mcp_servers_list(handler, parsed=None):
     """List configured MCP servers with safe, read-only runtime visibility."""
+    scope, workspace = _scope_and_workspace_from_request(parsed=parsed, body=None)
     cfg = get_config()
-    servers = cfg.get("mcp_servers", {})
-    if not isinstance(servers, dict):
-        servers = {}
+    servers, source_by_server = _effective_mcp_servers(cfg, workspace, scope)
     runtime = _mcp_runtime_status_by_name()
     result = [
         _server_summary(name, scfg, runtime.get(str(name)))
         for name, scfg in servers.items()
     ]
+    for row in result:
+        row["scope_source"] = source_by_server.get(str(row.get("name", "")), "global")
     return j(handler, {
         "servers": result,
-        "toggle_supported": False,
-        "reload_required": True,
+        "toggle_supported": True,
+        "reload_required": False,
+        "scope": scope,
+        "workspace": workspace,
     })
 
 
@@ -11735,6 +12243,27 @@ def _handle_mcp_server_delete(handler, name):
     _save_yaml_config_file(_get_config_path(), cfg)
     reload_config()
     return j(handler, {"ok": True, "deleted": name})
+
+
+def _handle_mcp_server_delete_by_body(handler, body):
+    name = str(body.get("name") or "").strip()
+    if not name:
+        return bad(handler, "name is required")
+    scope = _normalize_scope(body.get("scope"))
+    workspace = _workspace_from_request(body=body)
+    if scope == "project":
+        if not workspace:
+            return bad(handler, "workspace is required for project scope")
+        project_cfg = _load_project_config_for_workspace(workspace)
+        servers = project_cfg.get("mcp_servers", {})
+        if not isinstance(servers, dict):
+            servers = {}
+        # Keep a tombstone so effective resolution can disable inherited globals.
+        servers[name] = None
+        project_cfg["mcp_servers"] = servers
+        path = _save_project_config_for_workspace(workspace, project_cfg)
+        return j(handler, {"ok": True, "deleted": name, "scope": "project", "project_config_path": str(path)})
+    return _handle_mcp_server_delete(handler, name)
 
 
 _MASKED_PLACEHOLDER = "••••••"
@@ -11765,11 +12294,21 @@ def _handle_mcp_server_update(handler, name, body):
         return bad(handler, "name is required")
     # Validate: must have url (http) or command (stdio)
     server_cfg = {}
-    cfg = get_config()
-    servers = cfg.get("mcp_servers", {})
-    if not isinstance(servers, dict):
-        servers = {}
-    existing_cfg = servers.get(name, {})
+    scope = _normalize_scope(body.get("scope"))
+    workspace = _workspace_from_request(body=body)
+    if scope == "project":
+        if not workspace:
+            return bad(handler, "workspace is required for project scope")
+        cfg = _load_project_config_for_workspace(workspace)
+        servers = cfg.get("mcp_servers", {})
+        if not isinstance(servers, dict):
+            servers = {}
+    else:
+        cfg = get_config()
+        servers = cfg.get("mcp_servers", {})
+        if not isinstance(servers, dict):
+            servers = {}
+    existing_cfg = servers.get(name, {}) if isinstance(servers.get(name, {}), dict) else {}
     if body.get("url"):
         server_cfg["url"] = body["url"].strip()
         if body.get("headers"):
@@ -11789,6 +12328,25 @@ def _handle_mcp_server_update(handler, name, body):
             pass
     servers[name] = server_cfg
     cfg["mcp_servers"] = servers
+    if scope == "project":
+        path = _save_project_config_for_workspace(workspace, cfg)
+        return j(
+            handler,
+            {
+                "ok": True,
+                "scope": "project",
+                "workspace": workspace,
+                "project_config_path": str(path),
+                "server": _server_summary(name, server_cfg),
+            },
+        )
     _save_yaml_config_file(_get_config_path(), cfg)
     reload_config()
-    return j(handler, {"ok": True, "server": _server_summary(name, server_cfg)})
+    return j(handler, {"ok": True, "scope": "global", "server": _server_summary(name, server_cfg)})
+
+
+def _handle_mcp_server_save(handler, body):
+    name = str(body.get("name") or "").strip()
+    if not name:
+        return bad(handler, "name is required")
+    return _handle_mcp_server_update(handler, name, body)

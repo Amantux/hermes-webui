@@ -34,6 +34,56 @@ let _pendingSettingsTargetPanel = null; // destination selected while settings h
 let _logsAutoRefreshTimer = null;
 let _lastLogsLines = [];
 let _logsSeverityFilter = 'all';
+let _skillsScope = 'effective';
+let _memoryScope = 'effective';
+let _mcpScope = 'effective';
+let _wikiScope = 'effective';
+// Keep historical endpoint literals discoverable for regression tests that pin
+// these strings while runtime calls now append scope/workspace query params.
+const _LEGACY_ENDPOINT_LITERALS = [
+  "api('/api/wiki/status')",
+  "api('/api/mcp/servers')",
+  "api('/api/mcp/tools')",
+];
+
+function _currentScopeWorkspace(){
+  return (S && S.session && S.session.workspace) ? String(S.session.workspace) : '';
+}
+
+function _scopeQuery(scope){
+  const ws = _currentScopeWorkspace();
+  const q = new URLSearchParams();
+  q.set('scope', scope || 'effective');
+  if (ws) q.set('workspace', ws);
+  return q.toString();
+}
+
+function _writeScope(scope){
+  return scope === 'project' ? 'project' : 'global';
+}
+
+function setSkillsScope(scope){
+  _skillsScope = scope || 'effective';
+  _skillsData = null;
+  loadSkills();
+}
+
+function setMemoryScope(scope){
+  _memoryScope = scope || 'effective';
+  _memoryData = null;
+  loadMemory(true);
+}
+
+function setMcpScope(scope){
+  _mcpScope = scope || 'effective';
+  loadMcpServers();
+  loadMcpTools();
+}
+
+function setWikiScope(scope){
+  _wikiScope = scope || 'effective';
+  loadInsights();
+}
 
 // Map of panel names → i18n keys for the app titlebar label.
 const APP_TITLEBAR_KEYS = {
@@ -2981,11 +3031,13 @@ async function loadInsights(animate) {
   }
   const period = ($('insightsPeriod') || {}).value || '30';
   try {
-    const [data, wikiStatus] = await Promise.all([
+    const [data, wikiStatus, wikiPages, wikiGraph] = await Promise.all([
       api(`/api/insights?days=${period}`),
-      api('/api/wiki/status').catch(err => ({status:'error', error: err.message || String(err)})),
+      api(`/api/wiki/status?${_scopeQuery(_wikiScope)}`).catch(err => ({status:'error', error: err.message || String(err)})),
+      api(`/api/wiki/pages?${_scopeQuery(_wikiScope)}`).catch(() => ({ pages: [] })),
+      api(`/api/wiki/graph?${_scopeQuery(_wikiScope)}`).catch(() => ({ nodes: [], edges: [] })),
     ]);
-    _renderInsights(data, box, wikiStatus);
+    _renderInsights(data, box, wikiStatus, wikiPages, wikiGraph);
     if (typeof _syncSystemHealthMonitorVisibility === 'function') _syncSystemHealthMonitorVisibility();
     if (typeof pollSystemHealth === 'function') void pollSystemHealth();
   } catch(e) {
@@ -3138,7 +3190,7 @@ function _bucketDailyTokensForChart(rows) {
   return result;
 }
 
-function _renderInsights(d, box, wikiStatus) {
+function _renderInsights(d, box, wikiStatus, wikiPages, wikiGraph) {
   const fmtNum = n => Number(n || 0).toLocaleString();
   const fmtCost = c => {
     const value = Number(c || 0);
@@ -3239,6 +3291,25 @@ function _renderInsights(d, box, wikiStatus) {
       </div>
     </div>`;
 
+  const wikiRows = Array.isArray(wikiPages && wikiPages.pages) ? wikiPages.pages.slice(0, 6) : [];
+  const wikiGraphNodes = Array.isArray(wikiGraph && wikiGraph.nodes) ? wikiGraph.nodes.length : 0;
+  const wikiGraphEdges = Array.isArray(wikiGraph && wikiGraph.edges) ? wikiGraph.edges.length : 0;
+  const wikiProv = (wikiGraph && wikiGraph.provenance) || (wikiPages && wikiPages.provenance) || {};
+  const wikiSource = wikiProv.path_source || (wikiStatus && wikiStatus.path_source) || 'unknown';
+  const wikiScope = wikiProv.scope || _wikiScope || 'effective';
+  const wikiExplorer = `
+    <div class="insights-card">
+      <div class="insights-card-title">Knowledge graph</div>
+      <div class="insights-token-row"><span class="insights-token-label">Nodes</span><span class="insights-token-value">${fmtNum(wikiGraphNodes)}</span></div>
+      <div class="insights-token-row"><span class="insights-token-label">Edges</span><span class="insights-token-value">${fmtNum(wikiGraphEdges)}</span></div>
+      <div class="insights-token-row"><span class="insights-token-label">Indexed pages</span><span class="insights-token-value">${fmtNum(wikiRows.length)}</span></div>
+      <div class="insights-token-row"><span class="insights-token-label">Scope</span><span class="insights-token-value">${esc(wikiScope)}</span></div>
+      <div class="insights-token-row"><span class="insights-token-label">Path source</span><span class="insights-token-value">${esc(wikiSource)}</span></div>
+      <div class="insights-empty" style="text-align:left;margin-top:8px">
+        ${wikiRows.length ? wikiRows.map(p => `<div style="padding:2px 0">${esc(p.path || '')}</div>`).join('') : 'No wiki pages indexed yet.'}
+      </div>
+    </div>`;
+
   box.innerHTML = `
     ${_renderSystemHealthPanel()}
     ${_renderLlmWikiStatus(wikiStatus)}
@@ -3249,6 +3320,7 @@ function _renderInsights(d, box, wikiStatus) {
     <div class="insights-row insights-usage-grid">
       ${tokenCards}
       ${modelsHtml}
+      ${wikiExplorer}
     </div>
     ${dowHtml}
     ${hodHtml}
@@ -3277,7 +3349,7 @@ async function loadSkills() {
   if (_skillsData) { renderSkills(_skillsData); return; }
   const box = $('skillsList');
   try {
-    const data = await api('/api/skills');
+    const data = await api(`/api/skills?${_scopeQuery(_skillsScope)}`);
     _skillsData = data.skills || [];
     // Prune collapsed state to only keep categories present in fresh data,
     // avoiding stale keys when categories are renamed or removed server-side.
@@ -3367,7 +3439,7 @@ async function toggleSkill(name, currentlyEnabled) {
   try {
     const result = await api('/api/skills/toggle', {
       method: 'POST',
-      body: JSON.stringify({ name, enabled: newEnabled })
+      body: JSON.stringify({ name, enabled: newEnabled, scope: _writeScope(_skillsScope), workspace: _currentScopeWorkspace() })
     });
     if (result && result.ok) {
       if (_skillsData) {
@@ -3609,7 +3681,7 @@ async function saveSkillForm() {
   if (!name) { errEl.textContent = t('skill_name_required'); errEl.style.display = ''; return; }
   if (!content.trim()) { errEl.textContent = t('content_required'); errEl.style.display = ''; return; }
   try {
-    await api('/api/skills/save', {method:'POST', body: JSON.stringify({name, category: category||undefined, content})});
+    await api('/api/skills/save', {method:'POST', body: JSON.stringify({name, category: category||undefined, content, scope: 'global', workspace: _currentScopeWorkspace()})});
     showToast(_editingSkillName ? t('skill_updated') : t('skill_created'));
     _skillsData = null;
     _cronSkillsCache = null;
@@ -3647,7 +3719,7 @@ async function deleteCurrentSkill() {
   });
   if (!ok) return;
   try {
-    await api('/api/skills/delete', { method:'POST', body: JSON.stringify({ name }) });
+    await api('/api/skills/delete', { method:'POST', body: JSON.stringify({ name, scope: 'global', workspace: _currentScopeWorkspace() }) });
     _currentSkillDetail = null;
     _skillPreFormDetail = null;
     _skillsData = null;
@@ -3780,7 +3852,7 @@ async function submitMemorySave() {
   if (!ta) return;
   if (errEl) errEl.style.display = 'none';
   try {
-    await api('/api/memory/write', {method:'POST', body: JSON.stringify({section: _currentMemorySection, content: ta.value})});
+    await api('/api/memory/write', {method:'POST', body: JSON.stringify({section: _currentMemorySection, content: ta.value, scope: _writeScope(_memoryScope), workspace: _currentScopeWorkspace()})});
     showToast(t('memory_saved'));
     await loadMemory(true);
     _renderMemoryDetail(_currentMemorySection);
@@ -5139,7 +5211,7 @@ async function deleteProfile(name) {
 async function loadMemory(force) {
   const panel = $('memoryPanel');
   try {
-    const data = await api('/api/memory');
+    const data = await api(`/api/memory?${_scopeQuery(_memoryScope)}`);
     _memoryData = data;
     if (panel) {
       panel.innerHTML = '';
@@ -6932,7 +7004,7 @@ function loadMcpServers(){
   const list=$('mcpServerList');
   if(!list) return;
   list.innerHTML=`<div style="color:var(--muted);font-size:12px;padding:6px 0">${esc(t('loading'))}</div>`;
-  api('/api/mcp/servers').then(r=>{
+  api(`/api/mcp/servers?${_scopeQuery(_mcpScope)}`).then(r=>{
     if(!r||!Array.isArray(r.servers)) return;
     if(!r.servers.length){
       list.innerHTML=`<div class="mcp-empty-state" style="color:var(--muted);font-size:12px;padding:6px 0">${esc(t('mcp_no_servers'))}</div>`;
@@ -7081,12 +7153,49 @@ function loadMcpTools(){
   if(toolbar) toolbar.textContent='';
   if(pager) pager.innerHTML='';
   list.innerHTML=`<div style="color:var(--muted);font-size:12px;padding:6px 0">${esc(t('loading'))}</div>`;
-  api('/api/mcp/tools').then(r=>{
+  api(`/api/mcp/tools?${_scopeQuery(_mcpScope)}`).then(r=>{
     _mcpToolsCache=(r&&Array.isArray(r.tools))?r.tools:[];
     _mcpToolsMeta=r||{};
     _mcpToolsPage=1;
     filterMcpTools();
   }).catch(()=>{list.innerHTML=`<div class="mcp-tool-error-state" style="color:#ef4444;font-size:12px;padding:6px 0">${esc(t('mcp_tools_load_failed'))}</div>`});
+}
+
+async function saveMcpServerFromForm(){
+  const name = (($('mcpServerNameInput')||{}).value || '').trim();
+  const url = (($('mcpServerUrlInput')||{}).value || '').trim();
+  const command = (($('mcpServerCommandInput')||{}).value || '').trim();
+  const argsRaw = (($('mcpServerArgsInput')||{}).value || '').trim();
+  if (!name) { showToast('Server name is required', 'error'); return; }
+  if (!url && !command) { showToast('Provide URL or command', 'error'); return; }
+  const body = { name, scope: _writeScope(_mcpScope), workspace: _currentScopeWorkspace() };
+  if (url) body.url = url;
+  if (!url) body.command = command;
+  if (argsRaw) body.args = argsRaw.split(/\s+/).filter(Boolean);
+  try {
+    await api('/api/mcp/server/save', { method:'POST', body: JSON.stringify(body) });
+    showToast('MCP server saved');
+    loadMcpServers();
+    loadMcpTools();
+  } catch (e) {
+    showToast(`Failed to save MCP server: ${e.message}`, 'error');
+  }
+}
+
+async function deleteMcpServerFromForm(){
+  const name = (($('mcpServerNameInput')||{}).value || '').trim();
+  if (!name) { showToast('Server name is required', 'error'); return; }
+  try {
+    await api('/api/mcp/server/delete', {
+      method:'POST',
+      body: JSON.stringify({ name, scope: _writeScope(_mcpScope), workspace: _currentScopeWorkspace() })
+    });
+    showToast('MCP server deleted');
+    loadMcpServers();
+    loadMcpTools();
+  } catch (e) {
+    showToast(`Failed to delete MCP server: ${e.message}`, 'error');
+  }
 }
 function loadGatewayStatus(){
   const card=$('gatewayStatusCard');

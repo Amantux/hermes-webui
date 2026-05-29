@@ -242,6 +242,11 @@
       <div class="panel-head">
         <span data-i18n="tab_skills">Skills</span>
         <div class="panel-head-actions">
+          <select id="skillsScope" class="panel-head-select" onchange="setSkillsScope(this.value)" title="Skills scope">
+            <option value="effective">Effective</option>
+            <option value="global">Global</option>
+            <option value="project">Project</option>
+          </select>
           <button class="panel-head-btn has-tooltip has-tooltip--bottom" onclick="openSkillCreate()" data-tooltip="New skill" data-i18n-title="new_skill" aria-label="New skill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
         </div>
       </div>
@@ -252,6 +257,13 @@
     <div class="panel-view" id="panelMemory">
       <div class="panel-head">
         <span data-i18n="personal_memory">Personal memory</span>
+        <div class="panel-head-actions">
+          <select id="memoryScope" class="panel-head-select" onchange="setMemoryScope(this.value)" title="Memory scope">
+            <option value="effective">Effective</option>
+            <option value="global">Global</option>
+            <option value="project">Project</option>
+          </select>
+        </div>
       </div>
       <div class="side-menu" id="memoryPanel"><div style="padding:12px;color:var(--muted);font-size:12px" data-i18n="loading">Loading...</div></div>
     </div>
@@ -267,6 +279,11 @@
       <div class="panel-head">
         <span data-i18n="tab_insights">Insights</span>
         <div class="panel-head-actions">
+          <select id="wikiScope" class="panel-head-select" onchange="setWikiScope(this.value)" title="Wiki scope">
+            <option value="effective">Effective</option>
+            <option value="global">Global</option>
+            <option value="project">Project</option>
+          </select>
           <button class="panel-head-btn has-tooltip has-tooltip--bottom" id="insightsRefreshBtn" onclick="loadInsights(true)" data-tooltip="Refresh" aria-label="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button>
         </div>
       </div>
@@ -1286,8 +1303,27 @@
             <div class="settings-field" style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border)">
               <label data-i18n="mcp_servers_title">MCP Servers</label>
               <div style="font-size:11px;color:var(--muted);margin-bottom:8px" data-i18n="mcp_servers_desc">View Model Context Protocol servers configured in config.yaml.</div>
+              <div class="mcp-tool-toolbar" style="margin-bottom:8px">
+                <label class="mcp-tool-page-size">Scope
+                  <select id="mcpScope" onchange="setMcpScope(this.value)">
+                    <option value="effective">Effective</option>
+                    <option value="global">Global</option>
+                    <option value="project">Project</option>
+                  </select>
+                </label>
+              </div>
               <div id="mcpServerList"></div>
-              <div class="mcp-restart-hint" data-i18n="mcp_restart_hint">Server changes are read-only here for now. Edit config.yaml and restart Hermes for changes to take effect.</div>
+              <div class="mcp-restart-hint">Manage MCP entries below. Project scope writes to <code>&lt;workspace&gt;/.hermes/webui.project.yaml</code>.</div>
+              <div class="mcp-server-editor" style="margin-top:8px;display:grid;gap:6px">
+                <input id="mcpServerNameInput" type="text" placeholder="Server name">
+                <input id="mcpServerUrlInput" type="text" placeholder="HTTP URL (or leave blank for stdio)">
+                <input id="mcpServerCommandInput" type="text" placeholder="stdio command (used if URL empty)">
+                <input id="mcpServerArgsInput" type="text" placeholder="stdio args (space separated)">
+                <div style="display:flex;gap:6px">
+                  <button type="button" class="sm-btn" onclick="saveMcpServerFromForm()">Save MCP server</button>
+                  <button type="button" class="sm-btn" onclick="deleteMcpServerFromForm()">Delete by name</button>
+                </div>
+              </div>
             </div>
             <!-- MCP Tools Section -->
             <div class="settings-field" style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border)">

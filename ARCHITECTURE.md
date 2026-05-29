@@ -97,6 +97,11 @@ State directory (runtime data, separate from source):
     settings.json      User settings (default model, workspace, send key, password hash)
     projects.json      Session project groups (name, color, id)
 
+Workspace-scoped project overrides (optional, checked when scope is `project` or
+`effective` for MCP/skills/memory/wiki/graph):
+
+    <workspace>/.hermes/webui.project.yaml
+
 Log file:
 
     ~/.hermes/webui/bootstrap-8787.log   start.sh/bootstrap background server log

@@ -6,14 +6,162 @@ import os
 import re as _re
 import email.parser
 import tempfile
+import threading
 from pathlib import Path
 
-from api.config import MAX_UPLOAD_BYTES, STATE_DIR
+from api.config import MAX_UPLOAD_BYTES, STATE_DIR, load_settings
 from api.helpers import j, bad
 from api.models import get_session
 from api.workspace import safe_resolve_ws
 
 _MAX_EXTRACTED_BYTES = 10 * MAX_UPLOAD_BYTES
+_TRANSCRIPTION_PROVIDER_ENV = "HERMES_WEBUI_TRANSCRIPTION_PROVIDER"
+_TRANSCRIPTION_WHISPERX_MODEL_ENV = "HERMES_WEBUI_WHISPERX_MODEL"
+_TRANSCRIPTION_WHISPERX_DEVICE_ENV = "HERMES_WEBUI_WHISPERX_DEVICE"
+_TRANSCRIPTION_WHISPERX_COMPUTE_TYPE_ENV = "HERMES_WEBUI_WHISPERX_COMPUTE_TYPE"
+_TRANSCRIPTION_WHISPERX_LANGUAGE_ENV = "HERMES_WEBUI_WHISPERX_LANGUAGE"
+_TRANSCRIPTION_WHISPERX_BATCH_SIZE_ENV = "HERMES_WEBUI_WHISPERX_BATCH_SIZE"
+_TRANSCRIPTION_PROVIDER_VALUES = {"legacy", "whisperx", "auto"}
+_DEFAULT_TRANSCRIPTION_PROVIDER = "legacy"
+_WHISPERX_MODELS = {}
+_WHISPERX_MODELS_LOCK = threading.Lock()
+
+
+def _normalize_transcription_provider(value) -> str:
+    raw = str(value or "").strip().lower()
+    return raw if raw in _TRANSCRIPTION_PROVIDER_VALUES else ""
+
+
+def _resolve_transcription_provider() -> str:
+    env_provider = _normalize_transcription_provider(os.getenv(_TRANSCRIPTION_PROVIDER_ENV))
+    if env_provider:
+        return env_provider
+    try:
+        settings_provider = _normalize_transcription_provider(
+            load_settings().get("transcription_provider")
+        )
+        if settings_provider:
+            return settings_provider
+    except Exception:
+        pass
+    return _DEFAULT_TRANSCRIPTION_PROVIDER
+
+
+def _transcript_from_whisperx_result(result) -> str:
+    if not isinstance(result, dict):
+        return ""
+    if isinstance(result.get("text"), str) and result.get("text").strip():
+        return result.get("text").strip()
+    segments = result.get("segments")
+    if isinstance(segments, list):
+        parts = []
+        for seg in segments:
+            if isinstance(seg, dict):
+                text = str(seg.get("text") or "").strip()
+                if text:
+                    parts.append(text)
+        if parts:
+            return " ".join(parts).strip()
+    return ""
+
+
+def _transcribe_with_whisperx(audio_path: str) -> dict:
+    try:
+        import whisperx  # type: ignore
+    except Exception as exc:
+        return {
+            "success": False,
+            "error": f"WhisperX unavailable: {exc}",
+            "unavailable": True,
+        }
+
+    model_name = os.getenv(_TRANSCRIPTION_WHISPERX_MODEL_ENV, "base").strip() or "base"
+    device = os.getenv(_TRANSCRIPTION_WHISPERX_DEVICE_ENV, "cpu").strip() or "cpu"
+    default_compute_type = "int8" if device == "cpu" else "float16"
+    compute_type = (
+        os.getenv(_TRANSCRIPTION_WHISPERX_COMPUTE_TYPE_ENV, default_compute_type).strip()
+        or default_compute_type
+    )
+    language = os.getenv(_TRANSCRIPTION_WHISPERX_LANGUAGE_ENV, "").strip() or None
+    try:
+        batch_size = int(os.getenv(_TRANSCRIPTION_WHISPERX_BATCH_SIZE_ENV, "8") or 8)
+    except (TypeError, ValueError):
+        batch_size = 8
+    if batch_size <= 0:
+        batch_size = 8
+
+    model_key = (model_name, device, compute_type)
+    with _WHISPERX_MODELS_LOCK:
+        model = _WHISPERX_MODELS.get(model_key)
+        if model is None:
+            try:
+                model = whisperx.load_model(model_name, device, compute_type=compute_type)
+            except TypeError:
+                model = whisperx.load_model(model_name, device)
+            except Exception as exc:
+                return {
+                    "success": False,
+                    "error": f"WhisperX unavailable: {exc}",
+                    "unavailable": True,
+                }
+            _WHISPERX_MODELS[model_key] = model
+
+    try:
+        audio = whisperx.load_audio(audio_path)
+        kwargs = {"batch_size": batch_size}
+        if language:
+            kwargs["language"] = language
+        result = model.transcribe(audio, **kwargs)
+        transcript = _transcript_from_whisperx_result(result)
+        if not transcript:
+            return {"success": False, "error": "WhisperX transcription produced no text"}
+        return {"success": True, "transcript": transcript}
+    except Exception as exc:
+        return {"success": False, "error": f"WhisperX transcription failed: {exc}"}
+
+
+def _transcribe_with_legacy_provider(audio_path: str) -> dict:
+    try:
+        from tools.transcription_tools import transcribe_audio
+    except ImportError:
+        return {
+            "success": False,
+            "error": "Speech-to-text is unavailable on this server",
+            "unavailable": True,
+        }
+    try:
+        result = transcribe_audio(audio_path)
+    except Exception as exc:
+        return {"success": False, "error": f"Transcription failed: {exc}"}
+    if not isinstance(result, dict):
+        return {"success": False, "error": "Transcription failed"}
+    return result
+
+
+def _transcribe_audio(audio_path: str) -> dict:
+    provider = _resolve_transcription_provider()
+    if provider == "legacy":
+        return _transcribe_with_legacy_provider(audio_path)
+
+    whisperx_result = _transcribe_with_whisperx(audio_path)
+    if whisperx_result.get("success"):
+        return whisperx_result
+
+    whisperx_unavailable = bool(whisperx_result.get("unavailable"))
+    if provider == "auto" or whisperx_unavailable:
+        fallback_result = _transcribe_with_legacy_provider(audio_path)
+        if fallback_result.get("success"):
+            return fallback_result
+        if whisperx_result.get("error") and fallback_result.get("error"):
+            return {
+                "success": False,
+                "error": (
+                    f"{whisperx_result.get('error')}; fallback failed: "
+                    f"{fallback_result.get('error')}"
+                ),
+            }
+        return fallback_result
+    return whisperx_result
 
 
 def parse_multipart(rfile, content_type, content_length) -> tuple:
@@ -288,11 +436,7 @@ def handle_transcribe(handler):
         with tempfile.NamedTemporaryFile(prefix='webui-stt-', suffix=suffix, delete=False) as tmp:
             temp_path = tmp.name
             tmp.write(file_bytes)
-        try:
-            from tools.transcription_tools import transcribe_audio
-        except ImportError:
-            return j(handler, {'error': 'Speech-to-text is unavailable on this server'}, status=503)
-        result = transcribe_audio(temp_path)
+        result = _transcribe_audio(temp_path)
         if not result.get('success'):
             msg = str(result.get('error') or 'Transcription failed')
             status = 503 if 'unavailable' in msg.lower() or 'not configured' in msg.lower() else 400

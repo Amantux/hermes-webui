@@ -5,6 +5,13 @@
 
 ### Added
 
+- **Scoped configuration foundation (global/project/effective)** for MCP, skills, memory, LLM wiki, and wiki graph behavior. Project overrides are read from `<workspace>/.hermes/webui.project.yaml` with precedence `project > global > default`.
+- **MCP write APIs wired and exposed**: `POST /api/mcp/server/save` and `POST /api/mcp/server/delete` now support scoped writes (global or project). MCP listings/tools now accept scope/workspace context.
+- **Wiki functional APIs**: added `GET /api/wiki/pages`, `GET /api/wiki/search`, `GET /api/wiki/page`, and `GET /api/wiki/graph` for page inventory/search/read and graph extraction.
+- **Wiki provenance metadata**: wiki pages/search/page/graph responses now include explicit provenance payloads (scope, workspace, wiki path source, and per-node/per-edge attribution) for graph/query consumers.
+- **UI scope controls**: Skills, Memory, and MCP surfaces now expose scope selectors (Effective/Global/Project), and Insights now loads wiki page + graph data.
+- **Insights wiki scope control**: Insights now includes a Wiki scope selector and renders wiki provenance (scope/path source) alongside graph stats.
+- **Regression suite for scope precedence**: new `tests/test_project_scope_overrides.py` covering project-over-global behavior for MCP, skills, memory, wiki path selection, wiki graph extraction, and frontend scope wiring.
 - **Child session close button**: Each child session row in the sidebar now has a hover-reveal `×` button that archives the child session via `POST /api/session/archive` without leaving the parent session or closing other sessions.
 - **Live usage estimation functions**: `live_usage_prompt_estimate_after_tool_delta()` and `_bounded_live_tool_prompt_delta()` added as module-level functions in `api/streaming.py` — testable, importable, and used to estimate mid-turn prompt growth from tool results. Per-call cap: 12,000 tokens; per-turn cap: 24,000 tokens.
 - **MCP server configuration section** in README and Features list.
@@ -15,9 +22,11 @@
 - **Hermes-agent baked into Docker image**: `Dockerfile` now clones `NousResearch/hermes-agent` to `/opt/hermes` at build time and pre-warms the uv dependency cache. All hermes modules (`cron`, `agent`, `gateway`, etc.) are available on first container start without a mounted volume or network download.
 - **`HERMES_GATEWAY_ENABLED` env var**: Set to `1` in `.env` to start a background `hermes gateway run` daemon inside the single-container setup, enabling cron job automatic ticks.
 - **`HERMES_AGENT_REF` build arg**: Pin the hermes-agent git branch/tag at image build time (`--build-arg HERMES_AGENT_REF=v0.14.0`). Defaults to `main`.
+- **Selectable voice transcription backend** for `/api/transcribe`: new `transcription_provider` setting (`legacy`/`whisperx`/`auto`) plus env overrides (`HERMES_WEBUI_TRANSCRIPTION_PROVIDER`, `HERMES_WEBUI_WHISPERX_*`). WhisperX path now gracefully falls back to the legacy transcription provider when WhisperX is unavailable.
 
 ### Fixed
 
+- **Wiki page safety hardening**: `/api/wiki/page` now rejects forbidden roots, enforces markdown-only page reads, and caps page size to prevent unbounded file reads.
 - **Cron `ImportError` crash**: All cron API endpoints (`/api/crons`, `/api/crons/create`, `/api/crons/update`, etc.) now return a structured `{"unavailable": true, "unavailable_reason": "..."}` JSON response instead of crashing when `cron.jobs` is not on sys.path (e.g. single-container Docker installs without the hermes-agent cron module). The frontend cron panel shows a clear informational banner instead of an error.
 - **`_sse` function missing from `api/streaming.py`**: Restored the accidentally-orphaned `def _sse()` function definition that was dropped in a prior edit, fixing `ImportError: cannot import name '_sse'` at startup.
 
