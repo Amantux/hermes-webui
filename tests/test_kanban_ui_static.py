@@ -200,6 +200,13 @@ def test_kanban_new_task_header_button_opens_modal():
     assert "api('/api/kanban/tasks'" in qa_body
 
 
+def test_kanban_modal_and_comment_have_mic_buttons():
+    assert 'id="btnKanbanTaskMic"' in INDEX
+    assert "window._startMicForTextarea(document.getElementById('kanbanTaskModalBody'),this)" in INDEX
+    assert 'id="btnKanbanCommentMic"' in PANELS
+    assert "window._startMicForTextarea(document.getElementById('kanbanCommentInput'),this)" in PANELS
+
+
 def test_kanban_task_detail_has_edit_button_and_modal_supports_edit_mode():
     """The Kanban task detail view must surface an Edit button — the previous
     detail view exposed only status-transition buttons (Triage/Todo/Ready/...),

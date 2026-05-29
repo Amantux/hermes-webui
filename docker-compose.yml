@@ -3,9 +3,10 @@ services:
     build:
       context: .
       args:
-        # Pin to a specific hermes-agent commit/tag for reproducible builds.
-        # Omit (or set to "main") to always pull the latest agent source.
-        # HERMES_AGENT_REF: "v0.14.0"
+        # Pin to a specific hermes-agent git ref for reproducible builds.
+        # Uncomment and change to lock to a tag:
+        #   HERMES_AGENT_REF: "v0.14.0"
+        HERMES_AGENT_REF: "main"
     # UID/GID remapping, dependency install, and server startup are all handled
     # by docker_init.bash. DO NOT override CMD here — bypassing the init script
     # skips hermes-agent installation and UID alignment entirely.

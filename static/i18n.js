@@ -824,6 +824,20 @@ const LOCALES = {
     providers_oauth_hint: 'Authenticated via OAuth. No API key needed.',
     providers_oauth_config_yaml_hint: 'Token configured via config.yaml. To update, edit the providers section in your config.yaml or run hermes auth.',
     providers_oauth_not_configured_hint: 'Not authenticated. Run hermes auth in the terminal to configure this provider.',
+    providers_oauth_not_configured_hint_with_command: (providerCommand, fallbackCommand) => {
+      const primary = providerCommand || 'hermes auth';
+      const fallback = fallbackCommand || 'hermes auth';
+      if (fallback && fallback !== primary) {
+        return `Not authenticated. Run ${primary} in the terminal to configure this provider. If that fails, run ${fallback}.`;
+      }
+      return `Not authenticated. Run ${primary} in the terminal to configure this provider.`;
+    },
+    providers_oauth_copy_command: 'Copy command',
+    providers_oauth_recheck_auth: 'Recheck auth',
+    providers_oauth_rechecking: 'Rechecking…',
+    providers_oauth_recheck_success: 'Provider auth status refreshed',
+    providers_oauth_recheck_failed: 'Failed to refresh provider auth status',
+    providers_oauth_fallback_prefix: 'Fallback',
     providers_save: 'Save',
     providers_remove: 'Remove',
     providers_saving: 'Saving…',

@@ -1499,9 +1499,10 @@
   .git-context-status.ok .git-context-ok{color:#22c55e;}
   .git-context-status.error{color:var(--error,#ef4444);}
   .git-context-actions{display:flex;gap:6px;}
-  /* Mem mic button */
-  .mem-mic-btn{font-size:13px;padding:1px 5px;line-height:1;border-radius:5px;cursor:pointer;transition:background .12s,color .12s;}
-  .mem-mic-btn.recording{color:var(--error,#ef4444);background:rgba(239,68,68,.1);animation:mic-pulse 1.2s ease-in-out infinite;}
+  /* Panel mic button */
+  .panel-mic-btn,.mem-mic-btn{font-size:13px;padding:1px 5px;line-height:1;border-radius:5px;cursor:pointer;transition:background .12s,color .12s;}
+  .panel-mic-btn.recording,.mem-mic-btn.recording{color:var(--error,#ef4444);background:rgba(239,68,68,.1);animation:mic-pulse 1.2s ease-in-out infinite;}
+  .panel-mic-btn:disabled{opacity:.45;cursor:not-allowed;}
   .voice-mode-bar{font-size:11px;padding:4px 12px;display:flex;align-items:center;gap:8px;border-bottom:1px solid rgba(255,255,255,.05);}
   .voice-mode-indicator{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
   .voice-mode-indicator.listening{background:var(--error);animation:voice-mode-pulse 1s ease-in-out infinite;}
@@ -3081,6 +3082,34 @@ main.main.showing-logs > #mainLogs{display:flex;}
 }
 .provider-card.open .provider-card-body{display:block;}
 .provider-card-hint{font-size:12px;color:var(--muted);line-height:1.4;}
+.provider-card-auth-actions{
+  margin-top:10px;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+}
+.provider-card-auth-command{
+  display:inline-flex;
+  align-items:center;
+  padding:6px 8px;
+  border-radius:8px;
+  border:1px solid var(--border);
+  background:var(--surface);
+  font-size:11.5px;
+  font-family:var(--font-mono);
+  color:var(--text);
+}
+.provider-card-auth-btn{padding:6px 10px;}
+.provider-card-auth-fallback{
+  width:100%;
+  font-size:11px;
+  color:var(--muted);
+}
+.provider-card-auth-fallback code{
+  font-family:var(--font-mono);
+  color:var(--text);
+}
 .provider-card-field{display:flex;flex-direction:column;gap:6px;}
 .provider-card-label{
   font-size:11px;font-weight:500;color:var(--muted);

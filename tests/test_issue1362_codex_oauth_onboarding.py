@@ -228,6 +228,28 @@ def test_frontend_uses_onboarding_oauth_endpoints_and_no_secret_poll_url():
     assert "cancelCodexOAuth" in js
 
 
+def test_oauth_not_ready_state_shows_message_and_remediation_actions():
+    js = (REPO / "static" / "onboarding.js").read_text(encoding="utf-8")
+    i18n = (REPO / "static" / "i18n.js").read_text(encoding="utf-8")
+
+    assert "onboarding_oauth_provider_not_ready_body" in js
+    assert "onboarding_oauth_switch_hint" in js
+    assert "id=\"codexOAuthBtn\"" in js
+    assert "onclick=\"startCodexOAuth()\"" in js
+    assert "id=\"codexOAuthFlow\"" in js
+    assert "Run <code>hermes auth</code> or <code>hermes model</code>" in i18n
+
+
+def test_codex_oauth_flow_supports_copy_and_cancel_remediation():
+    js = (REPO / "static" / "onboarding.js").read_text(encoding="utf-8")
+
+    assert "Copy code" in js
+    assert "onclick=\"copyCodexOAuthCode(" in js
+    assert "onclick=\"cancelCodexOAuth()\"" in js
+    assert "api('/api/onboarding/oauth/cancel'" in js
+    assert "OAuth login cancelled" in js
+
+
 def test_unsupported_note_mentions_codex_and_claude_as_in_app():
     src = (REPO / "api" / "onboarding.py").read_text(encoding="utf-8")
     start = src.find("_UNSUPPORTED_PROVIDER_NOTE")

@@ -1477,7 +1477,7 @@
       <input type="text" id="kanbanTaskModalTitleInput" maxlength="500" autocomplete="off" required>
     </div>
     <div class="kanban-modal-row">
-      <label for="kanbanTaskModalBody" data-i18n="kanban_description">Description</label>
+      <label for="kanbanTaskModalBody" style="display:flex;align-items:center;gap:6px"><span data-i18n="kanban_description">Description</span><button type="button" id="btnKanbanTaskMic" class="panel-mic-btn icon-btn has-tooltip" data-tooltip="Dictate" data-i18n-title="voice_dictate" data-i18n-aria-label="voice_dictate" onclick="window._startMicForTextarea(document.getElementById('kanbanTaskModalBody'),this)" aria-label="Dictate" aria-pressed="false">🎤</button></label>
       <textarea id="kanbanTaskModalBody" rows="4" data-i18n-placeholder="kanban_description_placeholder" placeholder="Optional — what needs to happen, acceptance criteria, links"></textarea>
     </div>
     <div class="kanban-modal-row-inline">

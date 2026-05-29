@@ -2440,6 +2440,7 @@ function _kanbanRenderTaskDetail(data){
       ${_kanbanDetailSection('kanban-detail-log', t('kanban_worker_log'), log.content ? `<pre class="kanban-detail-pre">${esc(log.content)}</pre>` : '', 'kanban_empty')}
     </div>
     <div class="kanban-comment-form">
+      <label for="kanbanCommentInput" style="display:flex;align-items:center;gap:6px">${esc(t('kanban_add_comment'))}<button type="button" id="btnKanbanCommentMic" class="panel-mic-btn icon-btn has-tooltip" data-tooltip="${esc(t('voice_dictate')||'Dictate')}" onclick="window._startMicForTextarea(document.getElementById('kanbanCommentInput'),this)" aria-label="${esc(t('voice_dictate')||'Dictate')}" aria-pressed="false">🎤</button></label>
       <textarea id="kanbanCommentInput" rows="2" placeholder="${esc(t('kanban_add_comment'))}"></textarea>
       <button class="btn primary" onclick="addKanbanComment('${esc(task.id)}')">${esc(t('kanban_add_comment'))}</button>
     </div>`;
@@ -3633,7 +3634,7 @@ function _renderSkillForm({ name, category, content, isEdit }) {
           <input type="text" id="skillFormCategory" value="${esc(category || '')}" placeholder="${esc(t('skill_category_placeholder') || 'Optional, e.g. devops')}" autocomplete="off">
         </div>
         <div class="detail-form-row">
-          <label for="skillFormContent">${esc(t('skill_content') || 'SKILL.md content')}</label>
+          <label for="skillFormContent" style="display:flex;align-items:center;gap:6px">${esc(t('skill_content') || 'SKILL.md content')}<button type="button" id="btnSkillMic" class="panel-mic-btn icon-btn has-tooltip" data-tooltip="${esc(t('voice_dictate')||'Dictate')}" onclick="window._startMicForTextarea(document.getElementById('skillFormContent'),this)" aria-label="${esc(t('voice_dictate')||'Dictate')}" aria-pressed="false">🎤</button></label>
           <textarea id="skillFormContent" rows="18" placeholder="${esc(t('skill_content_placeholder') || 'YAML frontmatter + markdown body')}">${esc(content || '')}</textarea>
         </div>
         <div id="skillFormError" class="detail-form-error" style="display:none"></div>
@@ -3810,7 +3811,7 @@ function _renderMemoryEdit(section) {
     <div class="main-view-content">
       <form class="detail-form" onsubmit="event.preventDefault(); submitMemorySave();">
         <div class="detail-form-row" style="position:relative">
-          <label for="memEditContent" style="display:flex;align-items:center;gap:6px">${esc(t('memory_notes_label'))}<button type="button" id="btnMemMic" class="mem-mic-btn icon-btn has-tooltip" data-tooltip="Dictate" onclick="window._startMicForTextarea(document.getElementById('memEditContent'),this)" title="Dictate text">🎤</button></label>
+          <label for="memEditContent" style="display:flex;align-items:center;gap:6px">${esc(t('memory_notes_label'))}<button type="button" id="btnMemMic" class="panel-mic-btn icon-btn has-tooltip" data-tooltip="${esc(t('voice_dictate')||'Dictate')}" onclick="window._startMicForTextarea(document.getElementById('memEditContent'),this)" aria-label="${esc(t('voice_dictate')||'Dictate')}" aria-pressed="false">🎤</button></label>
           <textarea id="memEditContent" rows="20" spellcheck="false">${esc(content)}</textarea>
         </div>
         <div id="memEditError" class="detail-form-error" style="display:none"></div>
@@ -6088,6 +6089,73 @@ function _buildPluginCard(plugin){
 
 const _providerCardEls = new Map(); // providerId → {card, statusDot, input, saveBtn, removeBtn}
 
+function _providerAuthCommands(provider){
+  const providerId=String((provider&&provider.id)||'').trim().toLowerCase();
+  const commands=[];
+  if(/^[a-z][a-z0-9_-]{0,63}$/.test(providerId)) commands.push('hermes auth '+providerId);
+  if(providerId.endsWith('-oauth')){
+    const shortId=providerId.slice(0,-6);
+    if(/^[a-z][a-z0-9_-]{0,63}$/.test(shortId)) commands.push('hermes auth '+shortId);
+  }
+  commands.push('hermes auth');
+  return Array.from(new Set(commands));
+}
+
+function _buildProviderAuthActionRow(provider){
+  const commands=_providerAuthCommands(provider);
+  const command=commands[0]||'hermes auth';
+  const fallback=commands.find(c=>c!==command)||'';
+  const wrap=document.createElement('div');
+  wrap.className='provider-card-auth-actions';
+  const commandEl=document.createElement('code');
+  commandEl.className='provider-card-auth-command';
+  commandEl.textContent=command;
+  wrap.appendChild(commandEl);
+  const copyBtn=document.createElement('button');
+  copyBtn.type='button';
+  copyBtn.className='provider-card-btn provider-card-btn-ghost provider-card-auth-btn';
+  copyBtn.textContent=t('providers_oauth_copy_command')||'Copy command';
+  copyBtn.onclick=async()=>{
+    try{
+      await _copyText(command);
+      showToast((t('copied')||'Copied!')+': '+command);
+    }catch(e){
+      showToast((t('terminal_copy_failed')||'Copy failed: ')+command);
+    }
+  };
+  wrap.appendChild(copyBtn);
+  const recheckBtn=document.createElement('button');
+  recheckBtn.type='button';
+  recheckBtn.className='provider-card-btn provider-card-btn-ghost provider-card-auth-btn';
+  recheckBtn.textContent=t('providers_oauth_recheck_auth')||'Recheck auth';
+  recheckBtn.onclick=async()=>{
+    const original=recheckBtn.textContent;
+    recheckBtn.disabled=true;
+    recheckBtn.textContent=t('providers_oauth_rechecking')||'Rechecking…';
+    try{
+      const refreshed=await loadProvidersPanel();
+      showToast(refreshed
+        ? (t('providers_oauth_recheck_success')||'Provider auth status refreshed')
+        : (t('providers_oauth_recheck_failed')||'Failed to refresh provider auth status'));
+    }catch(e){
+      showToast(t('providers_oauth_recheck_failed')||'Failed to refresh provider auth status');
+    }finally{
+      if(recheckBtn.isConnected){
+        recheckBtn.disabled=false;
+        recheckBtn.textContent=original;
+      }
+    }
+  };
+  wrap.appendChild(recheckBtn);
+  if(fallback){
+    const fallbackEl=document.createElement('div');
+    fallbackEl.className='provider-card-auth-fallback';
+    fallbackEl.innerHTML=`${esc(t('providers_oauth_fallback_prefix')||'Fallback')}: <code>${esc(fallback)}</code>`;
+    wrap.appendChild(fallbackEl);
+  }
+  return wrap;
+}
+
 async function _fetchProviderQuotaStatus(force=false){
   const endpoint=force?`/api/provider/quota?refresh=1&ts=${Date.now()}`:'/api/provider/quota';
   const status=await api(endpoint,{cache:'no-store'});
@@ -6098,7 +6166,7 @@ async function _fetchProviderQuotaStatus(force=false){
 async function loadProvidersPanel(){
   const list=$('providersList');
   const empty=$('providersEmpty');
-  if(!list) return;
+  if(!list) return false;
   try{
     const data=await api('/api/providers');
     const quota=await _fetchProviderQuotaStatus(false).catch(e=>({ok:false,status:'unavailable',quota:null,message:e.message||t('provider_quota_unavailable'),client_fetched_at:new Date().toISOString()}));
@@ -6110,15 +6178,17 @@ async function loadProvidersPanel(){
     if(providers.length===0){
       list.style.display='none';
       if(empty) empty.style.display='';
-      return;
+      return true;
     }
     if(empty) empty.style.display='none';
     list.style.display='';
     for(const p of providers){
       list.appendChild(_buildProviderCard(p));
     }
+    return true;
   }catch(e){
     list.innerHTML='<div style="color:var(--error);padding:12px;font-size:13px">Failed to load providers: '+esc(e.message||String(e))+'</div>';
+    return false;
   }
 }
 
@@ -6412,6 +6482,7 @@ function _buildProviderCard(p){
   if(isOauth){
     const hint=document.createElement('div');
     hint.className='provider-card-hint';
+    let authActionRow=null;
     if(p.key_source==='config_yaml'){
       hint.textContent=t('providers_oauth_config_yaml_hint')||'Token configured via config.yaml. To update, edit the providers section in your config.yaml or run hermes auth.';
     } else if(p.auth_error){
@@ -6420,10 +6491,15 @@ function _buildProviderCard(p){
     } else if(p.has_key){
       hint.textContent=t('providers_oauth_hint');
     } else {
-      hint.textContent=t('providers_oauth_not_configured_hint')||'Not authenticated. Run hermes auth in the terminal to configure this provider.';
+      const authCommands=_providerAuthCommands(p);
+      const providerCommand=authCommands[0]||'hermes auth';
+      const fallbackCommand=authCommands.find(c=>c!==providerCommand)||'hermes auth';
+      hint.textContent=t('providers_oauth_not_configured_hint_with_command',providerCommand,fallbackCommand);
       hint.style.color='var(--muted)';
+      authActionRow=_buildProviderAuthActionRow(p);
     }
     body.appendChild(hint);
+    if(authActionRow) body.appendChild(authActionRow);
     card.appendChild(body);
     header.addEventListener('click',()=>card.classList.toggle('open'));
     return card;

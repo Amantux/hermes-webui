@@ -223,6 +223,33 @@ class TestBuildProviderCardJs:
             "Configured badge is not conditional on p.has_key"
         )
 
+    def test_oauth_not_configured_has_provider_specific_auth_command(self):
+        """Unauthenticated OAuth cards should suggest provider-aware auth commands."""
+        fn = self._get_fn()
+        assert "_providerAuthCommands(p)" in fn, (
+            "OAuth unauthenticated branch must build provider-aware auth commands."
+        )
+        assert "providers_oauth_not_configured_hint_with_command" in fn, (
+            "Expected unauthenticated OAuth hint to use i18n provider-specific command text."
+        )
+        assert "providerCommand" in fn and "fallbackCommand" in fn, (
+            "Expected unauthenticated OAuth hint to include primary and fallback commands."
+        )
+
+    def test_oauth_not_configured_has_copy_and_recheck_actions(self):
+        """OAuth unauthenticated cards should include copy + recheck auth controls."""
+        assert "function _buildProviderAuthActionRow(provider){" in self.JS, (
+            "Missing helper that renders OAuth auth action controls."
+        )
+        assert "providers_oauth_copy_command" in self.JS, "Missing i18n-backed copy action label."
+        assert "providers_oauth_recheck_auth" in self.JS, "Missing i18n-backed recheck action label."
+        assert "const refreshed=await loadProvidersPanel();" in self.JS, (
+            "Recheck auth action should refresh provider auth status."
+        )
+        assert "providers_oauth_recheck_success" in self.JS and "providers_oauth_recheck_failed" in self.JS, (
+            "Recheck auth flow should distinguish success vs failure toasts."
+        )
+
 
 # ---------------------------------------------------------------------------
 # Tests for i18n.js new keys
@@ -243,6 +270,18 @@ class TestI18nNewKeys:
         assert "providers_oauth_not_configured_hint" in self.I18N, (
             "Missing i18n key: providers_oauth_not_configured_hint."
         )
+
+    def test_providers_oauth_auth_action_keys_exist(self):
+        for key in (
+            "providers_oauth_not_configured_hint_with_command",
+            "providers_oauth_copy_command",
+            "providers_oauth_recheck_auth",
+            "providers_oauth_rechecking",
+            "providers_oauth_recheck_success",
+            "providers_oauth_recheck_failed",
+            "providers_oauth_fallback_prefix",
+        ):
+            assert key in self.I18N, f"Missing i18n key: {key}"
 
 
     def test_is_oauth_field_true_for_oauth_providers(self):

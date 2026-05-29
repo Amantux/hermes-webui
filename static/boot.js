@@ -567,10 +567,27 @@ window._micActive=window._micActive||false;
 // The btnEl is given the 'recording' class while active so CSS can style it.
 window._startMicForTextarea=(function(){
   let _active=null; // {ta, btn, mr, stream, chunks}
+  function _dictateLabel(active){
+    try{
+      if(typeof t==='function'){
+        const k=active?'voice_dictate_active':'voice_dictate';
+        return t(k)|| (active?'Stop dictation':'Dictate');
+      }
+    }catch(_){}
+    return active?'Stop dictation':'Dictate';
+  }
+  function _setBtnState(btn, isRecording){
+    if(!btn) return;
+    btn.classList.toggle('recording', !!isRecording);
+    btn.setAttribute('aria-pressed', isRecording ? 'true' : 'false');
+    const label=_dictateLabel(!!isRecording);
+    btn.setAttribute('aria-label', label);
+    _setButtonTooltip(btn, label);
+  }
   function _stop(){
     if(!_active) return;
     const a=_active; _active=null;
-    if(a.btn) a.btn.classList.remove('recording');
+    _setBtnState(a.btn, false);
     if(a.mr&&a.mr.state!=='inactive'){ try{a.mr.stop();}catch(_){} }
     if(a.stream){ a.stream.getTracks().forEach(t=>t.stop()); }
   }
@@ -591,11 +608,12 @@ window._startMicForTextarea=(function(){
     }catch(err){ if(typeof showToast==='function') showToast(err.message); }
   }
   return async function startMicForTextarea(ta, btnEl){
+    if(!ta) return;
     if(_active){ _stop(); return; }
     const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;
     const _canRec=!!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia&&window.MediaRecorder);
     if(!SpeechRecognition&&!_canRec){ if(typeof showToast==='function') showToast('Microphone not supported'); return; }
-    if(btnEl) btnEl.classList.add('recording');
+    _setBtnState(btnEl, true);
     if(SpeechRecognition){
       const rec=new SpeechRecognition();
       rec.continuous=false; rec.interimResults=true;
@@ -630,7 +648,7 @@ window._startMicForTextarea=(function(){
         if(blob.size) await _transcribe(blob,ta);
       };
       mr.start();
-    }catch(err){ if(btnEl) btnEl.classList.remove('recording'); if(typeof showToast==='function') showToast('Mic denied'); }
+    }catch(err){ _setBtnState(btnEl, false); if(typeof showToast==='function') showToast('Mic denied'); }
   };
 })();
 window._micPendingSend=window._micPendingSend||false;
